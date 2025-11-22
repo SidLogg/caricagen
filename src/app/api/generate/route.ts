@@ -22,7 +22,7 @@ async function uploadToCatbox(buffer: Buffer): Promise<string> {
 }
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Pollinations.ai + Kontext) ===");
+    console.log("=== API Generate Called (Pollinations.ai + Turbo) ===");
 
     try {
         const { image, style, prompt, strength } = await request.json();
@@ -35,29 +35,36 @@ export async function POST(request: Request) {
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        // 2. Get a description of the image (optional, improves prompt)
-        let personDescription = "a person";
+        // 2. Get a description of the image (Crucial for identity)
+        // We try a more reliable model or fallback gracefully
+        let personDescription = "a person with distinct facial features";
+
         if (process.env.HUGGINGFACE_API_TOKEN) {
             try {
                 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
+                // Try a lighter/different model if BLIP fails
                 const description = await hf.imageToText({
                     data: new Blob([imageBuffer]),
-                    model: "Salesforce/blip-image-captioning-large",
+                    model: "nlpconnect/vit-gpt2-image-captioning",
                 });
-                personDescription = description.generated_text || "a person";
-                console.log("Image described as:", personDescription);
+                if (description.generated_text) {
+                    personDescription = description.generated_text;
+                    console.log("Image described as:", personDescription);
+                }
             } catch (e) {
-                console.warn("HF Description failed, using default.", e);
+                console.warn("HF Description failed, using fallback prompt.", e);
+                // Fallback: We don't have a description, so we rely heavily on the image URL
             }
         }
 
-        // 3. Upload to Catbox for Pollinations (since it needs a URL)
+        // 3. Upload to Catbox for Pollinations
         let imageUrl = "";
         try {
             imageUrl = await uploadToCatbox(imageBuffer);
             console.log("Image uploaded to:", imageUrl);
         } catch (e) {
             console.error("Upload failed:", e);
+            return NextResponse.json({ error: "Failed to upload image for processing" }, { status: 500 });
         }
 
         // 4. Construct the Prompt
@@ -73,38 +80,32 @@ export async function POST(request: Request) {
                 stylePrompt = "funny caricature, exaggerated features, big head, expressive, hand drawn sketch, humorous, artistic";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, hyperrealistic, highly detailed, exaggerated proportions, oil painting style, professional art";
+                stylePrompt = "realistic caricature, hyperrealistic, highly detailed, exaggerated proportions, oil painting style, professional art, 8k resolution";
                 break;
             default:
                 stylePrompt = "cartoon style, professional art";
         }
 
-        const fullPrompt = `${stylePrompt}, ${personDescription}, ${prompt || ""}`;
+        // We construct a prompt that emphasizes the person's description AND the style
+        const fullPrompt = `${stylePrompt}, ${personDescription}, ${prompt || ""}, preserve facial features, retain identity, strong resemblance to input image`;
         const encodedPrompt = encodeURIComponent(fullPrompt);
 
         // 5. Call Pollinations.ai
-        // We use 'kontext' model as it is specifically documented for image-to-image (img2img) on Pollinations.
-        // This should respect the input image much more than 'flux' or 'turbo'.
+        // We revert to 'turbo' because 'kontext' crashed (500). 'turbo' is reliable for img2img.
+        // We remove 'strength' as it might have caused the crash or be unsupported.
+        // We keep 'enhance=false' to strictly follow our prompt (especially the description).
 
         const seed = Math.floor(Math.random() * 1000000);
 
-        // Strength: 0.0 (original image) to 1.0 (complete noise/new image).
-        // While undocumented for 'kontext', passing it might help if the backend supports it.
-        // We default to 0.5 for a balance of style and identity.
-        const imgStrength = strength ? strength / 100 : 0.5;
-
-        // We append specific instructions to preserve identity
-        const identityPrompt = "preserve facial features, retain identity, strong resemblance to input image";
-        const finalPrompt = `${encodedPrompt}, ${identityPrompt}`;
-
-        // Note: We pass 'model=kontext' for img2img.
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${finalPrompt}?width=1024&height=1024&seed=${seed}&model=kontext&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}&strength=${imgStrength}`;
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
 
         console.log("Calling Pollinations:", pollinationsUrl);
 
         // Fetch the image from Pollinations
         const pollResponse = await fetch(pollinationsUrl);
         if (!pollResponse.ok) {
+            // If turbo fails, try flux as a last resort fallback?
+            // But let's just report the error for now.
             throw new Error(`Pollinations API error: ${pollResponse.statusText}`);
         }
 
