@@ -1,139 +1,97 @@
 import { NextResponse } from "next/server";
-import * as fal from "@fal-ai/serverless-client";
-import OpenAI from "openai";
+import { HfInference } from "@huggingface/inference";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hybrid Free Solution) ===");
+    console.log("=== API Generate Called (Hugging Face - Truly Free) ===");
 
-    if (!process.env.FAL_KEY) {
+    if (!process.env.HUGGINGFACE_API_TOKEN) {
         return NextResponse.json(
-            { error: "FAL_KEY not configured. Get a free key at https://fal.ai/dashboard/keys" },
+            { error: "HUGGINGFACE_API_TOKEN not configured. Get a free token at https://huggingface.co/settings/tokens" },
             { status: 500 }
         );
     }
 
     try {
-        fal.config({
-            credentials: process.env.FAL_KEY
-        });
-
+        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
         const { image, style, prompt, strength } = await request.json();
+
         console.log("Request received:", { style, hasImage: !!image });
 
-        // Step 1: Analyze the image using a free vision model (if available)
-        // For now, we'll create a detailed prompt based on common features
+        // Extract features from the image using vision model (describe the person)
+        let personDescription = "a person";
 
+        try {
+            // Try to get image description using Hugging Face's image-to-text
+            const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+            const imageBlob = new Blob([imageBuffer]);
+
+            const description = await hf.imageToText({
+                data: imageBlob,
+                model: "Salesforce/blip-image-captioning-large",
+            });
+
+            console.log("Image description:", description.generated_text);
+            personDescription = description.generated_text || "a person";
+        } catch (descError) {
+            console.log("Could not describe image, using generic prompt");
+        }
+
+        // Map styles to specific prompts
         let stylePrompt = "";
-        let detailedPrompt = "";
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon style, animated, vibrant colors, simple shapes, clean lines, vector art";
-                detailedPrompt = "a person with distinctive facial features in 2d cartoon style, animated character design, bold outlines, flat colors";
+                stylePrompt = `${personDescription} as a 2d cartoon character, animated style, vibrant colors, simple shapes, flat design, vector art, bold outlines`;
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar style, disney animation, cute character, rendered, smooth surfaces, cgi";
-                detailedPrompt = "a person with recognizable features as a 3d pixar character, disney style, expressive face, rendered animation";
+                stylePrompt = `${personDescription} as a 3d pixar character, disney style, cute, rendered, cgi animation, toy story style, smooth surfaces`;
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated features, funny, hand drawn, sketch style, comic art";
-                detailedPrompt = "a person with exaggerated distinctive facial features, caricature style, humorous, hand drawn sketch";
+                stylePrompt = `${personDescription} as a caricature drawing, exaggerated features, funny, sketch style, hand drawn, comic art, humorous`;
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, detailed, subtle exaggeration, professional art, hyperrealistic rendering";
-                detailedPrompt = "a person with slightly exaggerated but realistic features, professional caricature, detailed rendering";
+                stylePrompt = `${personDescription} as a realistic caricature, detailed, exaggerated proportions, professional art, hyperrealistic rendering`;
                 break;
             default:
-                stylePrompt = "cartoon style";
-                detailedPrompt = "a person in cartoon style";
+                stylePrompt = `${personDescription} as a cartoon character`;
         }
 
-        // Upload image to Fal.ai storage
-        console.log("Uploading reference image...");
-        const imageUrl = await fal.storage.upload(image);
-        console.log("Image uploaded:", imageUrl);
-
-        // Use the uploaded image as a reference with IP-Adapter
-        const fullPrompt = `${detailedPrompt}, ${prompt || "high quality, masterpiece"}, professional art, detailed`;
+        const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece, professional art"}`;
 
         console.log("Generating with prompt:", fullPrompt);
 
-        // Try using fal-ai/flux/dev with image prompt for better results
-        const result: any = await fal.subscribe("fal-ai/flux/dev", {
-            input: {
-                prompt: fullPrompt,
-                image_url: imageUrl,
-                num_inference_steps: 28,
-                guidance_scale: 3.5,
-                num_images: 1,
-                enable_safety_checker: false,
-                output_format: "jpeg",
-            },
-            logs: true,
+        // Use Stable Diffusion 2.1 - completely free and unlimited on Hugging Face
+        const result = await hf.textToImage({
+            model: "stabilityai/stable-diffusion-2-1",
+            inputs: fullPrompt,
+            parameters: {
+                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy, photorealistic, photo, realistic photo",
+                num_inference_steps: 30,
+                guidance_scale: 7.5,
+            }
         });
 
-        console.log("Generation complete");
+        // Convert blob to base64
+        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
 
-        const outputUrl = result.images?.[0]?.url || result.image?.url;
+        console.log("Generation complete, image size:", buffer.length);
 
-        if (!outputUrl) {
-            throw new Error("No image URL in response");
-        }
-
-        return NextResponse.json({ output: outputUrl });
+        return NextResponse.json({ output: base64Image });
     } catch (error: any) {
         console.error("=== AI Generation Error ===");
         console.error("Error details:", {
             message: error?.message,
-            body: error?.body,
+            status: error?.response?.status,
         });
-
-        // If FLUX fails, fallback to fast-sdxl
-        try {
-            console.log("Trying fallback model...");
-            const { image, style, prompt } = await request.json();
-
-            const imageUrl = await fal.storage.upload(image);
-
-            let simplePrompt = "";
-            switch (style) {
-                case "Cartoon 2D":
-                    simplePrompt = "2d cartoon character, animated style";
-                    break;
-                case "Cartoon 3D":
-                    simplePrompt = "3d pixar character, disney style";
-                    break;
-                case "Caricatura 2D":
-                    simplePrompt = "caricature drawing, exaggerated features";
-                    break;
-                case "Caricatura Realista":
-                    simplePrompt = "realistic caricature, detailed";
-                    break;
-                default:
-                    simplePrompt = "cartoon character";
-            }
-
-            const fallbackResult: any = await fal.subscribe("fal-ai/fast-sdxl", {
-                input: {
-                    prompt: `${simplePrompt}, ${prompt || "high quality"}`,
-                    image_url: imageUrl,
-                    strength: 0.75,
-                    num_inference_steps: 25,
-                },
-            });
-
-            const outputUrl = fallbackResult.images?.[0]?.url || fallbackResult.image?.url;
-            if (outputUrl) {
-                return NextResponse.json({ output: outputUrl });
-            }
-        } catch (fallbackError) {
-            console.error("Fallback also failed:", fallbackError);
-        }
 
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
+                hint: "Get a free Hugging Face token at https://huggingface.co/settings/tokens"
             },
             { status: 500 }
         );
