@@ -24,6 +24,11 @@ export async function POST(request: Request) {
         const { image, style, prompt, strength } = await request.json();
         console.log("Request received:", { style, hasImage: !!image, strength });
 
+        // Upload the base64 image to Fal.ai storage first
+        console.log("Uploading image to Fal.ai storage...");
+        const imageUrl = await fal.storage.upload(image);
+        console.log("Image uploaded to:", imageUrl);
+
         // Map styles to specific prompts
         let stylePrompt = "";
 
@@ -45,7 +50,10 @@ export async function POST(request: Request) {
         }
 
         const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece"}`;
-        const imageStrength = strength ? (2.5 - strength) / 2.5 : 0.4; // Convert to 0-1 range, inverted
+
+        // Strength: 0 = identical to input, 1 = completely new
+        // We want high strength for caricature effect but still preserve identity
+        const imageStrength = strength ? strength / 100 * 0.6 + 0.2 : 0.5; // Range: 0.2-0.8
 
         console.log("Calling Fal.ai with prompt:", fullPrompt);
         console.log("Image strength:", imageStrength);
@@ -54,11 +62,11 @@ export async function POST(request: Request) {
         const result: any = await fal.subscribe("fal-ai/fast-sdxl", {
             input: {
                 prompt: fullPrompt,
-                image_url: image,
+                image_url: imageUrl,
                 strength: imageStrength,
-                num_inference_steps: 25,
+                num_inference_steps: 30,
                 guidance_scale: 7.5,
-                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy",
+                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy, photorealistic, photo",
             },
             logs: true,
         });
