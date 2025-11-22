@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Slider } from '@/components/ui/slider'; // We'll need to create a simple slider or use input range
+
 import { ArrowRight, RefreshCw } from 'lucide-react';
 
 interface FacialControlsProps {
