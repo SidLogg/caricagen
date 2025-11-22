@@ -19,8 +19,8 @@ export async function POST(request: Request) {
     try {
         const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
-        const { image, style, prompt } = await request.json();
-        console.log("Request received:", { style, hasImage: !!image });
+        const { image, style, prompt, strength } = await request.json();
+        console.log("Request received:", { style, hasImage: !!image, strength });
 
         // Map styles to specific prompts
         let stylePrompt = "";
@@ -46,13 +46,21 @@ export async function POST(request: Request) {
 
         console.log("Calling Hugging Face with prompt:", fullPrompt);
 
-        // Using Stable Diffusion XL - completely free on Hugging Face
-        const result = await hf.textToImage({
-            model: "stabilityai/stable-diffusion-xl-base-1.0",
-            inputs: fullPrompt,
+        // Convert base64 to Blob
+        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        const imageBlob = new Blob([imageBuffer]);
+
+        // Using Image-to-Image with the input photo
+        const result = await hf.imageToImage({
+            model: "timbrooks/instruct-pix2pix",
+            inputs: imageBlob,
             parameters: {
-                negative_prompt: "ugly, blurry, low quality, distorted",
-                num_inference_steps: 30,
+                prompt: fullPrompt,
+                negative_prompt: "ugly, blurry, low quality, distorted, deformed",
+                num_inference_steps: 20,
+                guidance_scale: 7.5,
+                image_guidance_scale: strength || 1.5, // Controls how much to follow the original image
             }
         });
 

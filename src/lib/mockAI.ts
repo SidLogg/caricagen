@@ -53,11 +53,62 @@ export async function generateInitial(style: Style, files: File[]): Promise<Gene
 }
 
 export async function updateFacial(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
-    // For now, we'll just return the current image as re-generation is expensive/complex
-    // In a full implementation, this would call the API again with img2img
-    return currentImage;
+    try {
+        // Map exaggeration level (0-100) to strength (1.0-2.5)
+        // Higher exaggeration = lower image guidance (more creative freedom)
+        const strength = 1.0 + (exaggeration / 100) * 1.5;
+
+        const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                image: currentImage,
+                style: "Caricatura 2D", // We can infer this or pass it through
+                prompt: `facial features, ${prompt}`,
+                strength,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to update facial features');
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.output) ? data.output[0] : data.output;
+    } catch (error) {
+        console.error("Facial update failed:", error);
+        // Return current image if update fails
+        return currentImage;
+    }
 }
 
 export async function updateBody(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
-    return currentImage;
+    try {
+        const strength = 1.0 + (exaggeration / 100) * 1.5;
+
+        const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                image: currentImage,
+                style: "Caricatura 2D",
+                prompt: `full body, ${prompt}`,
+                strength,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to update body');
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.output) ? data.output[0] : data.output;
+    } catch (error) {
+        console.error("Body update failed:", error);
+        return currentImage;
+    }
 }
