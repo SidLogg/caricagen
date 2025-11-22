@@ -1,23 +1,25 @@
 import { NextResponse } from "next/server";
-import { HfInference } from "@huggingface/inference";
+import * as fal from "@fal-ai/serverless-client";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hugging Face) ===");
+    console.log("=== API Generate Called (Fal.ai) ===");
     console.log("ENV Check:", {
-        hasToken: !!process.env.HUGGINGFACE_API_TOKEN,
-        tokenPrefix: process.env.HUGGINGFACE_API_TOKEN?.substring(0, 5)
+        hasToken: !!process.env.FAL_KEY,
+        tokenPrefix: process.env.FAL_KEY?.substring(0, 10)
     });
 
-    if (!process.env.HUGGINGFACE_API_TOKEN) {
-        console.error("HUGGINGFACE_API_TOKEN is not set");
+    if (!process.env.FAL_KEY) {
+        console.error("FAL_KEY is not set");
         return NextResponse.json(
-            { error: "HUGGINGFACE_API_TOKEN not configured. Get a free token at https://huggingface.co/settings/tokens" },
+            { error: "FAL_KEY not configured. Get a free key at https://fal.ai/dashboard/keys" },
             { status: 500 }
         );
     }
 
     try {
-        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
+        fal.config({
+            credentials: process.env.FAL_KEY
+        });
 
         const { image, style, prompt, strength } = await request.json();
         console.log("Request received:", { style, hasImage: !!image, strength });
@@ -27,57 +29,54 @@ export async function POST(request: Request) {
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon character, animated style, vibrant colors, simple shapes, flat design";
+                stylePrompt = "2d cartoon character, animated style, vibrant colors, simple shapes, flat design, vector art";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar character, disney style, cute, rendered, cgi animation";
+                stylePrompt = "3d pixar character, disney style, cute, rendered, cgi animation, toy story style";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated features, funny, sketch style, hand drawn";
+                stylePrompt = "caricature drawing, exaggerated features, funny, sketch style, hand drawn, comic style";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, detailed, exaggerated proportions, professional art";
+                stylePrompt = "realistic caricature, detailed, exaggerated proportions, professional art, hyperrealistic";
                 break;
             default:
                 stylePrompt = "cartoon character";
         }
 
         const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece"}`;
+        const imageStrength = strength ? (2.5 - strength) / 2.5 : 0.4; // Convert to 0-1 range, inverted
 
-        console.log("Calling Hugging Face with prompt:", fullPrompt);
+        console.log("Calling Fal.ai with prompt:", fullPrompt);
+        console.log("Image strength:", imageStrength);
 
-        // Convert base64 to Blob
-        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-        const imageBlob = new Blob([imageBuffer]);
-
-        // Using Image-to-Image with the input photo
-        const result = await hf.imageToImage({
-            model: "timbrooks/instruct-pix2pix",
-            inputs: imageBlob,
-            parameters: {
+        // Using Fal.ai's SDXL with image-to-image (completely free)
+        const result: any = await fal.subscribe("fal-ai/fast-sdxl", {
+            input: {
                 prompt: fullPrompt,
-                negative_prompt: "ugly, blurry, low quality, distorted, deformed",
-                num_inference_steps: 20,
+                image_url: image,
+                strength: imageStrength,
+                num_inference_steps: 25,
                 guidance_scale: 7.5,
-                image_guidance_scale: strength || 1.5, // Controls how much to follow the original image
-            }
+                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy",
+            },
+            logs: true,
         });
 
-        // Convert blob to base64
-        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
+        console.log("Fal.ai response:", result);
 
-        console.log("Hugging Face response received, image size:", buffer.length);
+        const outputUrl = result.images?.[0]?.url || result.image?.url;
 
-        return NextResponse.json({ output: base64Image });
+        if (!outputUrl) {
+            throw new Error("No image URL in response");
+        }
+
+        return NextResponse.json({ output: outputUrl });
     } catch (error: any) {
         console.error("=== AI Generation Error ===");
         console.error("Error details:", {
             message: error?.message,
-            status: error?.response?.status,
-            data: error?.response?.data,
+            body: error?.body,
             stack: error?.stack
         });
 
@@ -85,7 +84,7 @@ export async function POST(request: Request) {
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Get a free Hugging Face token at https://huggingface.co/settings/tokens"
+                hint: "Get a free Fal.ai key at https://fal.ai/dashboard/keys"
             },
             { status: 500 }
         );
