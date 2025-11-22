@@ -1,26 +1,15 @@
 import { NextResponse } from "next/server";
-
-// Helper to upload image to Catbox
-async function uploadToCatbox(buffer: Buffer): Promise<string> {
-    const formData = new FormData();
-    formData.append('reqtype', 'fileupload');
-    formData.append('userhash', '');
-    formData.append('fileToUpload', new Blob([buffer as any]), 'image.png');
-
-    const response = await fetch('https://catbox.moe/user/api.php', {
-        method: 'POST',
-        body: formData,
-    });
-
-    if (!response.ok) {
-        throw new Error('Failed to upload image');
-    }
-
-    return (await response.text()).trim();
-}
+import * as fal from "@fal-ai/serverless-client";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Pollinations.ai Optimized) ===");
+    console.log("=== API Generate Called (Fal.ai FLUX) ===");
+
+    if (!process.env.FAL_KEY) {
+        return NextResponse.json(
+            { error: "FAL_KEY not configured. Get free API key at https://fal.ai/dashboard/keys" },
+            { status: 500 }
+        );
+    }
 
     try {
         const { image, style, prompt } = await request.json();
@@ -29,69 +18,86 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "No image provided" }, { status: 400 });
         }
 
-        // Prepare image
-        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-        const imageBuffer = Buffer.from(base64Data, 'base64');
+        // Configure Fal.ai
+        fal.config({
+            credentials: process.env.FAL_KEY
+        });
 
-        // Upload to get public URL
-        const imageUrl = await uploadToCatbox(imageBuffer);
-        console.log("Image uploaded:", imageUrl);
+        // Convert base64 to data URL format that Fal accepts
+        const imageDataUrl = image.startsWith('data:') ? image : `data:image/png;base64,${image}`;
 
-        // Create style-specific prompt
+        // Create style-specific prompts
         let stylePrompt = "";
-        let model = "turbo"; // Default model
+        let negativePrompt = "ugly, blurry, low quality, distorted, deformed, bad anatomy, different person, wrong face";
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "transform into 2d cartoon style, animated character, vibrant colors, bold outlines, cel shading, preserve facial features and identity";
-                model = "turbo";
+                stylePrompt = "2d cartoon style, animated character, vibrant colors, bold black outlines, cel shading, flat design, vector art, same person, preserve facial features";
+                negativePrompt += ", 3d, realistic, photo";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "transform into 3d pixar disney style, cgi character, smooth render, cute, maintain face identity and features";
-                model = "turbo";
+                stylePrompt = "3d pixar disney style, cgi rendered character, smooth surfaces, cute, toy story aesthetic, volumetric lighting, same person, keep face identity";
+                negativePrompt += ", 2d, flat, realistic photo";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "transform into caricature drawing, exaggerated facial features, big head, funny proportions, comic art, keep face recognizable";
-                model = "turbo";
+                stylePrompt = "caricature drawing, exaggerated facial features, big expressive head, funny proportions, comic art style, hand drawn, same person, recognizable face";
+                negativePrompt += ", realistic, photo, normal proportions";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "transform into realistic caricature, exaggerated proportions, detailed rendering, professional portrait, preserve identity";
-                model = "turbo";
+                stylePrompt = "realistic caricature art, exaggerated proportions, detailed rendering, professional portrait, oil painting quality, same person, maintain identity";
+                negativePrompt += ", photo, normal proportions";
                 break;
             default:
-                stylePrompt = "transform into cartoon style, preserve face";
+                stylePrompt = "cartoon character, same person";
         }
 
         const fullPrompt = `${stylePrompt}${prompt ? ', ' + prompt : ''}`;
-        const encodedPrompt = encodeURIComponent(fullPrompt);
-        const seed = Math.floor(Math.random() * 1000000);
 
-        // Use Pollinations with image parameter for img2img
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
+        console.log("Generating with Fal.ai FLUX...");
+        console.log("Prompt:", fullPrompt);
 
-        console.log("Calling Pollinations:", pollinationsUrl);
+        // Use FLUX LoRA model which is excellent for face preservation
+        const result = await fal.subscribe("fal-ai/flux-lora", {
+            input: {
+                prompt: fullPrompt,
+                image_url: imageDataUrl,
+                negative_prompt: negativePrompt,
+                num_inference_steps: 28,
+                guidance_scale: 3.5,
+                num_images: 1,
+                enable_safety_checker: false,
+                output_format: "jpeg",
+                strength: 0.75, // How much to transform (0.75 = strong style but keep identity)
+            },
+            logs: true,
+            onQueueUpdate: (update) => {
+                if (update.status === "IN_PROGRESS") {
+                    console.log("Generation in progress...");
+                }
+            },
+        });
 
-        const pollResponse = await fetch(pollinationsUrl);
+        console.log("Generation complete!");
 
-        if (!pollResponse.ok) {
-            throw new Error(`Pollinations error: ${pollResponse.statusText}`);
-        }
+        // Get the output image URL
+        const outputUrl = (result as any).images[0].url;
 
-        const arrayBuffer = await pollResponse.arrayBuffer();
+        // Fetch and convert to base64
+        const imageResponse = await fetch(outputUrl);
+        const arrayBuffer = await imageResponse.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-
-        console.log("Generation complete");
 
         return NextResponse.json({ output: base64Image });
 
     } catch (error: any) {
-        console.error("Generation Error:", error);
+        console.error("Fal.ai Generation Error:", error);
+
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Image generation failed. Please try with a different photo or style."
+                hint: "Fal.ai error. Check if FAL_KEY is valid and you have credits. Get free key at https://fal.ai/dashboard/keys"
             },
             { status: 500 }
         );

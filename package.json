@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@fal-ai/serverless-client": "^0.15.0",
     "@gradio/client": "^2.0.0",
     "@huggingface/inference": "^4.13.3",
     "clsx": "^2.1.1",
