@@ -1,15 +1,26 @@
 import { NextResponse } from "next/server";
-import * as fal from "@fal-ai/serverless-client";
+
+// Helper to upload image to Catbox
+async function uploadToCatbox(buffer: Buffer): Promise<string> {
+    const formData = new FormData();
+    formData.append('reqtype', 'fileupload');
+    formData.append('userhash', '');
+    formData.append('fileToUpload', new Blob([buffer as any]), 'image.png');
+
+    const response = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to upload image');
+    }
+
+    return (await response.text()).trim();
+}
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Fal.ai FLUX) ===");
-
-    if (!process.env.FAL_KEY) {
-        return NextResponse.json(
-            { error: "FAL_KEY not configured. Get free API key at https://fal.ai/dashboard/keys" },
-            { status: 500 }
-        );
-    }
+    console.log("=== API Generate Called (Pollinations.ai Optimized) ===");
 
     try {
         const { image, style, prompt } = await request.json();
@@ -18,96 +29,75 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "No image provided" }, { status: 400 });
         }
 
-        // Configure Fal.ai
-        fal.config({
-            credentials: process.env.FAL_KEY
-        });
+        // Prepare image
+        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        // Convert base64 to data URL format that Fal accepts
-        const imageDataUrl = image.startsWith('data:') ? image : `data:image/png;base64,${image}`;
+        // Upload to get public URL
+        console.log("Uploading image...");
+        const imageUrl = await uploadToCatbox(imageBuffer);
 
-        // Create style-specific prompts
+        // Optimized prompts for Pollinations.ai
         let stylePrompt = "";
-        let negativePrompt = "ugly, blurry, low quality, distorted, deformed, bad anatomy, different person, wrong face";
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon style, animated character, vibrant colors, bold black outlines, cel shading, flat design, vector art, same person, preserve facial features";
-                negativePrompt += ", 3d, realistic, photo";
+                stylePrompt = "2D cartoon character, flat colors, bold black outlines, animated style, cel-shaded, vector art, vibrant palette, simple shapes";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar disney style, cgi rendered character, smooth surfaces, cute, toy story aesthetic, volumetric lighting, same person, keep face identity";
-                negativePrompt += ", 2d, flat, realistic photo";
+                stylePrompt = "3D Pixar Disney character, CGI render, smooth shading, cute proportions, Toy Story style, volumetric lighting, 3D model";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated facial features, big expressive head, funny proportions, comic art style, hand drawn, same person, recognizable face";
-                negativePrompt += ", realistic, photo, normal proportions";
+                stylePrompt = "caricature illustration, exaggerated facial features, oversized head, funny cartoon, comic book art, hand-drawn, humorous portrait";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature art, exaggerated proportions, detailed rendering, professional portrait, oil painting quality, same person, maintain identity";
-                negativePrompt += ", photo, normal proportions";
+                stylePrompt = "realistic caricature painting, exaggerated features, detailed rendering, oil painting, professional portrait, hyperrealistic";
                 break;
             default:
-                stylePrompt = "cartoon character, same person";
+                stylePrompt = "cartoon character illustration";
         }
 
-        const fullPrompt = `${stylePrompt}${prompt ? ', ' + prompt : ''}`;
+        // Build optimized final prompt
+        let finalPrompt = stylePrompt;
 
-        console.log("Generating with Fal.ai FLUX...");
-        console.log("Prompt:", fullPrompt);
+        if (prompt && prompt.trim()) {
+            // User prompt gets priority with quality keywords
+            finalPrompt = `${stylePrompt}, ${prompt.trim()}, detailed, high quality, professional artwork`;
+        } else {
+            finalPrompt = `${stylePrompt}, masterpiece quality, professional art`;
+        }
 
-        // Use FLUX Dev model which is FREE
-        const result = await fal.subscribe("fal-ai/flux/dev", {
-            input: {
-                prompt: fullPrompt,
-                image_url: imageDataUrl,
-                negative_prompt: negativePrompt,
-                num_inference_steps: 28,
-                guidance_scale: 3.5,
-                num_images: 1,
-                enable_safety_checker: false,
-                output_format: "jpeg",
-            },
-            logs: true,
-            onQueueUpdate: (update) => {
-                if (update.status === "IN_PROGRESS") {
-                    console.log("Generation in progress...");
-                }
-            },
-        });
+        const encodedPrompt = encodeURIComponent(finalPrompt);
+        const seed = Math.floor(Math.random() * 1000000);
 
-        console.log("Generation complete!");
+        // Use Pollinations with enhance=true for better quality
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=true&image=${encodeURIComponent(imageUrl)}`;
 
-        // Get the output image URL
-        const outputUrl = (result as any).images[0].url;
+        console.log("Generating with prompt:", finalPrompt);
 
-        // Fetch and convert to base64
-        const imageResponse = await fetch(outputUrl);
-        const arrayBuffer = await imageResponse.arrayBuffer();
+        const pollResponse = await fetch(pollinationsUrl);
+
+        if (!pollResponse.ok) {
+            throw new Error(`Pollinations error: ${pollResponse.statusText}`);
+        }
+
+        const arrayBuffer = await pollResponse.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+
+        console.log("Generation complete");
 
         return NextResponse.json({ output: base64Image });
 
     } catch (error: any) {
-        console.error("Fal.ai Generation Error:", error);
-        console.error("Error details:", {
-            message: error?.message,
-            status: error?.status,
-            body: error?.body,
-            stack: error?.stack
-        });
-
+        console.error("Generation Error:", error);
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                status: error?.status || 500,
-                hint: error?.status === 403
-                    ? "API key is invalid or expired. Get a new key at https://fal.ai/dashboard/keys"
-                    : "Fal.ai error. Check console logs for details."
+                hint: "Image generation failed. Please try with a different photo or style."
             },
-            { status: error?.status || 500 }
+            { status: 500 }
         );
     }
 }

@@ -118,6 +118,7 @@ export default function Home() {
                                     image={currentImage}
                                     onNext={handleFacialNext}
                                     onUpdate={handleFacialUpdate}
+                                    onBack={() => setStep(1)}
                                 />
                             )}
                             {step === 3 && (
@@ -125,12 +126,14 @@ export default function Home() {
                                     image={currentImage}
                                     onNext={handleBodyNext}
                                     onUpdate={handleBodyUpdate}
+                                    onBack={() => setStep(2)}
                                 />
                             )}
                             {step === 4 && (
                                 <DownloadSection
                                     image={currentImage}
                                     onReset={handleReset}
+                                    onBack={() => setStep(3)}
                                 />
                             )}
                         </motion.div>

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
-import { Upload, Check } from 'lucide-react';
+import { Upload, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Style } from '@/lib/ai';
 
@@ -37,6 +37,10 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
         }
     };
 
+    const removeFile = (index: number) => {
+        setFiles((prev) => prev.filter((_, i) => i !== index));
+    };
+
     return (
         <div className="space-y-8 w-full max-w-4xl mx-auto p-6">
             <div className="text-center space-y-2">
@@ -56,16 +60,12 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
                             selectedStyle === style.id ? "border-primary ring-2 ring-primary ring-offset-2" : "border-transparent hover:border-border"
                         )}
                     >
-                        {/* Example image for each style */}
                         <img
                             src={`/examples/${style.id.toLowerCase().replace(' ', '-')}.png`}
                             alt={style.label}
                             className="absolute inset-0 w-full h-full object-cover"
                         />
-
-                        {/* Dark overlay for text readability */}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-
                         <div className="relative z-10 text-white font-bold text-lg p-4">
                             {style.label}
                         </div>
@@ -99,12 +99,19 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
                 {files.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto pb-2">
                         {files.map((file, i) => (
-                            <div key={i} className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border bg-muted">
+                            <div key={i} className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border bg-muted group">
                                 <img
                                     src={URL.createObjectURL(file)}
                                     alt="preview"
                                     className="w-full h-full object-cover"
                                 />
+                                <button
+                                    onClick={() => removeFile(i)}
+                                    className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110"
+                                    aria-label="Remover foto"
+                                >
+                                    <X size={14} />
+                                </button>
                             </div>
                         ))}
                     </div>

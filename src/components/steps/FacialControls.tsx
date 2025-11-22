@@ -1,24 +1,22 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { ArrowRight, ArrowLeft, RefreshCw } from 'lucide-react';
 
 interface FacialControlsProps {
     image: string;
     onNext: (exaggeration: number, prompt: string) => void;
     onUpdate: (exaggeration: number, prompt: string) => void;
+    onBack: () => void;
 }
 
-export default function FacialControls({ image, onNext, onUpdate }: FacialControlsProps) {
+export default function FacialControls({ image, onNext, onUpdate, onBack }: FacialControlsProps) {
     const [exaggeration, setExaggeration] = useState(20);
     const [prompt, setPrompt] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
     const isFirstRender = useRef(true);
 
-    // Debounce update to simulate real-time preview
     useEffect(() => {
         if (isFirstRender.current) {
             isFirstRender.current = false;
@@ -28,7 +26,7 @@ export default function FacialControls({ image, onNext, onUpdate }: FacialContro
         const timer = setTimeout(() => {
             setIsUpdating(true);
             onUpdate(exaggeration, prompt);
-            setTimeout(() => setIsUpdating(false), 500); // Fake loading state
+            setTimeout(() => setIsUpdating(false), 500);
         }, 500);
         return () => clearTimeout(timer);
     }, [exaggeration, prompt]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -44,7 +42,6 @@ export default function FacialControls({ image, onNext, onUpdate }: FacialContro
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full max-w-6xl mx-auto p-6 h-[calc(100vh-100px)]">
-            {/* Preview Area */}
             <div className="relative rounded-xl overflow-hidden bg-muted border flex items-center justify-center h-full min-h-[400px]">
                 <div className="relative w-full h-full">
                     <img src={image} alt="Generated Art" className="w-full h-full object-contain" />
@@ -56,7 +53,6 @@ export default function FacialControls({ image, onNext, onUpdate }: FacialContro
                 </div>
             </div>
 
-            {/* Controls Area */}
             <div className="flex flex-col justify-center space-y-8">
                 <div>
                     <h2 className="text-3xl font-bold mb-2">Arte Facial</h2>
@@ -92,10 +88,16 @@ export default function FacialControls({ image, onNext, onUpdate }: FacialContro
                     />
                 </div>
 
-                <div className="pt-4">
+                <div className="flex gap-3 pt-4">
+                    <button
+                        onClick={onBack}
+                        className="bg-secondary text-secondary-foreground px-6 py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                    >
+                        <ArrowLeft size={20} /> Voltar
+                    </button>
                     <button
                         onClick={() => onNext(exaggeration, prompt)}
-                        className="w-full bg-primary text-primary-foreground px-8 py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                        className="flex-1 bg-primary text-primary-foreground px-8 py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
                     >
                         Próximo: Corpo <ArrowRight size={20} />
                     </button>

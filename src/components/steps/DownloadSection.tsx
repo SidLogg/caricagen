@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Download, FileImage, FileText, PenTool } from 'lucide-react';
+import { Check, Download, FileImage, FileText, PenTool, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface DownloadSectionProps {
     image: string;
     onReset: () => void;
+    onBack: () => void;
 }
 
 type Format = 'BITMAP' | 'PDF' | 'VECTOR_BW' | 'VECTOR_COLOR';
@@ -18,7 +19,7 @@ const FORMATS: { id: Format; label: string; desc: string; icon: any }[] = [
     { id: 'VECTOR_COLOR', label: 'VETOR COLORIDO', desc: '.CDR/.AI Colorido HD', icon: PenTool },
 ];
 
-export default function DownloadSection({ image, onReset }: DownloadSectionProps) {
+export default function DownloadSection({ image, onReset, onBack }: DownloadSectionProps) {
     const [selectedFormat, setSelectedFormat] = useState<Format | null>(null);
     const [isDownloading, setIsDownloading] = useState(false);
 
@@ -26,22 +27,18 @@ export default function DownloadSection({ image, onReset }: DownloadSectionProps
         if (!selectedFormat) return;
         setIsDownloading(true);
 
-        // Simulate download delay
         setTimeout(() => {
             setIsDownloading(false);
-            // In a real app, this would trigger a file download
             alert(`Download iniciado: ${selectedFormat}`);
         }, 1500);
     };
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full max-w-6xl mx-auto p-6 h-[calc(100vh-100px)]">
-            {/* Result Area */}
             <div className="relative rounded-xl overflow-hidden bg-muted border flex items-center justify-center h-full min-h-[400px]">
                 <img src={image} alt="Final Art" className="w-full h-full object-contain" />
             </div>
 
-            {/* Download Options */}
             <div className="flex flex-col justify-center space-y-8">
                 <div>
                     <h2 className="text-3xl font-bold mb-2">Sua Arte está Pronta!</h2>
@@ -88,12 +85,20 @@ export default function DownloadSection({ image, onReset }: DownloadSectionProps
                         )}
                     </button>
 
-                    <button
-                        onClick={onReset}
-                        className="w-full px-8 py-3 rounded-lg font-medium text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                        Criar Nova Arte
-                    </button>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={onBack}
+                            className="flex-1 px-6 py-3 rounded-lg font-medium border border-border hover:bg-secondary transition-colors flex items-center justify-center gap-2"
+                        >
+                            <ArrowLeft size={18} /> Voltar
+                        </button>
+                        <button
+                            onClick={onReset}
+                            className="flex-1 px-6 py-3 rounded-lg font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                            Nova Arte
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
