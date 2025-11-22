@@ -1,15 +1,26 @@
 import { NextResponse } from "next/server";
-import { HfInference } from "@huggingface/inference";
+
+// Helper to upload image to Catbox
+async function uploadToCatbox(buffer: Buffer): Promise<string> {
+    const formData = new FormData();
+    formData.append('reqtype', 'fileupload');
+    formData.append('userhash', '');
+    formData.append('fileToUpload', new Blob([buffer as any]), 'image.png');
+
+    const response = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to upload image');
+    }
+
+    return (await response.text()).trim();
+}
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hugging Face Hybrid Approach) ===");
-
-    if (!process.env.HUGGINGFACE_API_TOKEN) {
-        return NextResponse.json(
-            { error: "HUGGINGFACE_API_TOKEN not configured in .env.local" },
-            { status: 500 }
-        );
-    }
+    console.log("=== API Generate Called (Pollinations.ai Optimized) ===");
 
     try {
         const { image, style, prompt } = await request.json();
@@ -18,77 +29,57 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "No image provided" }, { status: 400 });
         }
 
-        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
-
-        // Prepare the image
+        // Prepare image
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
-        const imageBlob = new Blob([imageBuffer]);
 
-        // STEP 1: Get DETAILED description of the person
-        let personDescription = "a person";
-        try {
-            const description = await hf.imageToText({
-                data: imageBlob,
-                model: "Salesforce/blip-image-captioning-base",
-            });
-            personDescription = description.generated_text || "a person";
-            console.log("Detailed description:", personDescription);
-        } catch (e) {
-            console.warn("Description failed, using generic");
-        }
+        // Upload to get public URL
+        const imageUrl = await uploadToCatbox(imageBuffer);
+        console.log("Image uploaded:", imageUrl);
 
-        // STEP 2: Enhance description with facial details
-        // We create a very detailed prompt that captures the person's identity
-        const identityPrompt = `portrait of ${personDescription}, detailed facial features, accurate likeness, recognizable face`;
-
-        // Map styles to artistic prompts
+        // Create style-specific prompt
         let stylePrompt = "";
-        let negativePrompt = "ugly, blurry, low quality, distorted, deformed, bad anatomy, multiple people, crowd";
+        let model = "turbo"; // Default model
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "in 2d cartoon style, animated character, vibrant colors, simple shapes, flat design, vector art, bold outlines, cel shading";
-                negativePrompt += ", realistic, photo, photograph, 3d";
+                stylePrompt = "transform into 2d cartoon style, animated character, vibrant colors, bold outlines, cel shading, preserve facial features and identity";
+                model = "turbo";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "in 3d pixar style, disney character design, cgi animation, rendered, smooth surfaces, cute, toy story aesthetic";
-                negativePrompt += ", realistic, photo, photograph, 2d, flat";
+                stylePrompt = "transform into 3d pixar disney style, cgi character, smooth render, cute, maintain face identity and features";
+                model = "turbo";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "as caricature drawing, exaggerated facial features, funny proportions, big expressive head, comic art style, hand drawn, sketch";
-                negativePrompt += ", realistic, photo, photograph, normal proportions";
+                stylePrompt = "transform into caricature drawing, exaggerated facial features, big head, funny proportions, comic art, keep face recognizable";
+                model = "turbo";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "as realistic caricature, detailed rendering, exaggerated proportions, professional portrait art, hyperrealistic style, oil painting quality";
-                negativePrompt += ", photo, photograph, normal proportions";
+                stylePrompt = "transform into realistic caricature, exaggerated proportions, detailed rendering, professional portrait, preserve identity";
+                model = "turbo";
                 break;
             default:
-                stylePrompt = "as cartoon character, animated style";
+                stylePrompt = "transform into cartoon style, preserve face";
         }
 
-        // STEP 3: Combine everything into a powerful prompt
-        const fullPrompt = `${identityPrompt} ${stylePrompt}, ${prompt || ""}, high quality, masterpiece, professional art, single person, clear face`;
+        const fullPrompt = `${stylePrompt}${prompt ? ', ' + prompt : ''}`;
+        const encodedPrompt = encodeURIComponent(fullPrompt);
+        const seed = Math.floor(Math.random() * 1000000);
 
-        console.log("Final generation prompt:", fullPrompt);
+        // Use Pollinations with image parameter for img2img
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
 
-        // STEP 4: Generate with text-to-image (which IS supported)
-        const result = await hf.textToImage({
-            model: "stabilityai/stable-diffusion-xl-base-1.0",
-            inputs: fullPrompt,
-            parameters: {
-                negative_prompt: negativePrompt,
-                num_inference_steps: 35,
-                guidance_scale: 8.0,
-                width: 1024,
-                height: 1024,
-            }
-        });
+        console.log("Calling Pollinations:", pollinationsUrl);
 
-        // Convert blob to base64
-        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
+        const pollResponse = await fetch(pollinationsUrl);
+
+        if (!pollResponse.ok) {
+            throw new Error(`Pollinations error: ${pollResponse.statusText}`);
+        }
+
+        const arrayBuffer = await pollResponse.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
+        const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
 
         console.log("Generation complete");
 
@@ -96,12 +87,11 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error("Generation Error:", error);
-
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Ensure HUGGINGFACE_API_TOKEN is valid. The API generates based on a detailed description of your photo."
+                hint: "Image generation failed. Please try with a different photo or style."
             },
             { status: 500 }
         );
