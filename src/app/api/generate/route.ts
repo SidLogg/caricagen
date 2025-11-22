@@ -15,67 +15,90 @@ export async function POST(request: Request) {
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        // Map styles to Hugging Face Space endpoints
-        let spaceUrl = "";
-        let styleParam = "";
+        // List of Spaces to try (in order of preference)
+        const spacesToTry = [
+            "akhaliq/AnimeGANv2",  // Anime/cartoon style
+            "Xenova/cartoonify",   // General cartoonization
+            "multimodalart/face-to-sticker", // Face transformation
+        ];
 
-        switch (style) {
-            case "Cartoon 2D":
-            case "Cartoon 3D":
-                // Use Cartoonify Space - excellent for cartoon transformations
-                spaceUrl = "catacolabs/cartoonify";
-                styleParam = "cartoon";
-                break;
-            case "Caricatura 2D":
-            case "Caricatura Realista":
-                // Use VToonify for caricature-style transformations
-                spaceUrl = "PKUWilliamYang/VToonify";
-                styleParam = "caricature";
-                break;
-            default:
-                spaceUrl = "catacolabs/cartoonify";
-                styleParam = "cartoon";
-        }
+        let lastError = null;
 
-        console.log(`Using Hugging Face Space: ${spaceUrl}`);
+        // Try each Space until one works
+        for (const spaceUrl of spacesToTry) {
+            try {
+                console.log(`Attempting to use Space: ${spaceUrl}`);
 
-        // Connect to the Gradio Space
-        const client = await Client.connect(spaceUrl);
+                // Connect to the Gradio Space with HF token if available
+                const clientOptions: any = {};
+                if (process.env.HUGGINGFACE_API_TOKEN) {
+                    clientOptions.hf_token = process.env.HUGGINGFACE_API_TOKEN;
+                }
 
-        // Call the prediction endpoint
-        // Most Gradio Spaces accept a file input and return an image
-        const result = await client.predict("/predict", {
-            image: new Blob([imageBuffer], { type: "image/png" }),
-        });
+                const client = await Client.connect(spaceUrl, clientOptions);
 
-        // Extract the output image URL from the result
-        let outputUrl = "";
+                // Call the prediction endpoint
+                // Different Spaces have different API signatures, so we try common patterns
+                let result;
+                try {
+                    // Pattern 1: Simple image input
+                    result = await client.predict("/predict", {
+                        image: new Blob([imageBuffer], { type: "image/png" }),
+                    });
+                } catch (e) {
+                    // Pattern 2: Named parameter
+                    result = await client.predict(0, [
+                        new Blob([imageBuffer], { type: "image/png" })
+                    ]);
+                }
 
-        if (result && result.data && Array.isArray(result.data)) {
-            // Gradio typically returns [{"url": "..."}] or similar
-            const firstOutput = result.data[0];
-            if (typeof firstOutput === 'string') {
-                outputUrl = firstOutput;
-            } else if (firstOutput && firstOutput.url) {
-                outputUrl = firstOutput.url;
+                // Extract the output image URL from the result
+                let outputUrl = "";
+
+                if (result && result.data) {
+                    const data = result.data;
+
+                    // Try different response formats
+                    if (Array.isArray(data) && data.length > 0) {
+                        const firstOutput = data[0];
+                        if (typeof firstOutput === 'string') {
+                            outputUrl = firstOutput;
+                        } else if (firstOutput && firstOutput.url) {
+                            outputUrl = firstOutput.url;
+                        } else if (firstOutput && firstOutput.path) {
+                            // Some Spaces return a path that needs to be prefixed
+                            outputUrl = `https://huggingface.co/spaces/${spaceUrl}/resolve/main/${firstOutput.path}`;
+                        }
+                    }
+                }
+
+                if (!outputUrl) {
+                    throw new Error("No output URL in response");
+                }
+
+                console.log(`Success with Space: ${spaceUrl}`);
+
+                // Fetch the image from the URL and convert to base64
+                const imageResponse = await fetch(outputUrl);
+                if (!imageResponse.ok) {
+                    throw new Error("Failed to fetch generated image");
+                }
+
+                const arrayBuffer = await imageResponse.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+
+                return NextResponse.json({ output: base64Image });
+
+            } catch (error: any) {
+                console.warn(`Space ${spaceUrl} failed:`, error.message);
+                lastError = error;
+                // Continue to next Space
             }
         }
 
-        if (!outputUrl) {
-            throw new Error("No output URL received from Hugging Face Space");
-        }
-
-        // Fetch the image from the URL and convert to base64
-        const imageResponse = await fetch(outputUrl);
-        if (!imageResponse.ok) {
-            throw new Error("Failed to fetch generated image");
-        }
-
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-
-        return NextResponse.json({ output: base64Image });
+        // If all Spaces failed, throw the last error
+        throw new Error(`All Spaces failed. Last error: ${lastError?.message || 'Unknown'}`);
 
     } catch (error: any) {
         console.error("Generation Error:", error);
@@ -83,7 +106,7 @@ export async function POST(request: Request) {
             {
                 error: "Failed to generate image",
                 details: error.message,
-                hint: "Hugging Face Space might be unavailable or rate-limited. Please try again."
+                hint: "Hugging Face Spaces might be unavailable. Please ensure HUGGINGFACE_API_TOKEN is set in .env.local"
             },
             { status: 500 }
         );
