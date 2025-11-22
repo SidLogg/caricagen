@@ -56,8 +56,8 @@ export async function POST(request: Request) {
         console.log("Generating with Fal.ai FLUX...");
         console.log("Prompt:", fullPrompt);
 
-        // Use FLUX LoRA model which is excellent for face preservation
-        const result = await fal.subscribe("fal-ai/flux-lora", {
+        // Use FLUX Dev model which is FREE
+        const result = await fal.subscribe("fal-ai/flux/dev", {
             input: {
                 prompt: fullPrompt,
                 image_url: imageDataUrl,
@@ -67,7 +67,6 @@ export async function POST(request: Request) {
                 num_images: 1,
                 enable_safety_checker: false,
                 output_format: "jpeg",
-                strength: 0.75, // How much to transform (0.75 = strong style but keep identity)
             },
             logs: true,
             onQueueUpdate: (update) => {
