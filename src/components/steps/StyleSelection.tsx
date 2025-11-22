@@ -52,15 +52,21 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
                         whileTap={{ scale: 0.95 }}
                         onClick={() => setSelectedStyle(style.id)}
                         className={cn(
-                            "cursor-pointer rounded-xl overflow-hidden border-2 transition-all relative aspect-[3/4] flex flex-col justify-end p-4",
-                            selectedStyle === style.id ? "border-primary ring-2 ring-primary ring-offset-2" : "border-transparent hover:border-border",
-                            style.color
+                            "cursor-pointer rounded-xl overflow-hidden border-2 transition-all relative aspect-[3/4] flex flex-col justify-end",
+                            selectedStyle === style.id ? "border-primary ring-2 ring-primary ring-offset-2" : "border-transparent hover:border-border"
                         )}
                     >
-                        {/* Placeholder for preview image */}
-                        <div className="absolute inset-0 opacity-20 bg-black" />
+                        {/* Example image for each style */}
+                        <img
+                            src={`/examples/${style.id.toLowerCase().replace(' ', '-')}.png`}
+                            alt={style.label}
+                            className="absolute inset-0 w-full h-full object-cover"
+                        />
 
-                        <div className="relative z-10 text-white font-bold text-lg">
+                        {/* Dark overlay for text readability */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+                        <div className="relative z-10 text-white font-bold text-lg p-4">
                             {style.label}
                         </div>
                         {selectedStyle === style.id && (
