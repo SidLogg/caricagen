@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { HfInference } from "@huggingface/inference";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hugging Face Image-to-Image) ===");
+    console.log("=== API Generate Called (Hugging Face Hybrid Approach) ===");
 
     if (!process.env.HUGGINGFACE_API_TOKEN) {
         return NextResponse.json(
@@ -25,45 +25,63 @@ export async function POST(request: Request) {
         const imageBuffer = Buffer.from(base64Data, 'base64');
         const imageBlob = new Blob([imageBuffer]);
 
-        // Map styles to prompts for image-to-image transformation
+        // STEP 1: Get DETAILED description of the person
+        let personDescription = "a person";
+        try {
+            const description = await hf.imageToText({
+                data: imageBlob,
+                model: "Salesforce/blip-image-captioning-base",
+            });
+            personDescription = description.generated_text || "a person";
+            console.log("Detailed description:", personDescription);
+        } catch (e) {
+            console.warn("Description failed, using generic");
+        }
+
+        // STEP 2: Enhance description with facial details
+        // We create a very detailed prompt that captures the person's identity
+        const identityPrompt = `portrait of ${personDescription}, detailed facial features, accurate likeness, recognizable face`;
+
+        // Map styles to artistic prompts
         let stylePrompt = "";
-        let negativePrompt = "ugly, blurry, low quality, distorted, deformed, bad anatomy";
+        let negativePrompt = "ugly, blurry, low quality, distorted, deformed, bad anatomy, multiple people, crowd";
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon style, animated, vibrant colors, simple shapes, flat design, vector art, bold outlines, cel shading, cartoon character";
+                stylePrompt = "in 2d cartoon style, animated character, vibrant colors, simple shapes, flat design, vector art, bold outlines, cel shading";
                 negativePrompt += ", realistic, photo, photograph, 3d";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar style, disney character, cgi animation, rendered, smooth surfaces, cute, toy story style, 3d cartoon";
-                negativePrompt += ", realistic, photo, photograph, 2d";
+                stylePrompt = "in 3d pixar style, disney character design, cgi animation, rendered, smooth surfaces, cute, toy story aesthetic";
+                negativePrompt += ", realistic, photo, photograph, 2d, flat";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated features, funny, big head, comic art, hand drawn, sketch style, caricature";
-                negativePrompt += ", realistic, photo, photograph";
+                stylePrompt = "as caricature drawing, exaggerated facial features, funny proportions, big expressive head, comic art style, hand drawn, sketch";
+                negativePrompt += ", realistic, photo, photograph, normal proportions";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, detailed, exaggerated proportions, professional portrait, hyperrealistic rendering, caricature art";
-                negativePrompt += ", photo, photograph";
+                stylePrompt = "as realistic caricature, detailed rendering, exaggerated proportions, professional portrait art, hyperrealistic style, oil painting quality";
+                negativePrompt += ", photo, photograph, normal proportions";
                 break;
             default:
-                stylePrompt = "cartoon character, animated style";
+                stylePrompt = "as cartoon character, animated style";
         }
 
-        const fullPrompt = `${stylePrompt}, ${prompt || ""}, high quality, masterpiece, professional art, preserve face identity, maintain facial features`;
+        // STEP 3: Combine everything into a powerful prompt
+        const fullPrompt = `${identityPrompt} ${stylePrompt}, ${prompt || ""}, high quality, masterpiece, professional art, single person, clear face`;
 
-        console.log("Transforming image with prompt:", fullPrompt);
+        console.log("Final generation prompt:", fullPrompt);
 
-        // Use IMAGE-TO-IMAGE with SDXL Base (more reliable than Refiner)
-        const result = await hf.imageToImage({
+        // STEP 4: Generate with text-to-image (which IS supported)
+        const result = await hf.textToImage({
             model: "stabilityai/stable-diffusion-xl-base-1.0",
-            inputs: imageBlob,
+            inputs: fullPrompt,
             parameters: {
-                prompt: fullPrompt,
                 negative_prompt: negativePrompt,
-                num_inference_steps: 30,
-                guidance_scale: 7.5,
-                strength: 0.75, // 0.75 = strong style transfer while keeping identity
+                num_inference_steps: 35,
+                guidance_scale: 8.0,
+                width: 1024,
+                height: 1024,
             }
         });
 
@@ -72,7 +90,7 @@ export async function POST(request: Request) {
         const buffer = Buffer.from(arrayBuffer);
         const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
 
-        console.log("Image transformation complete");
+        console.log("Generation complete");
 
         return NextResponse.json({ output: base64Image });
 
@@ -83,7 +101,7 @@ export async function POST(request: Request) {
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Ensure HUGGINGFACE_API_TOKEN is valid and has access to inference API"
+                hint: "Ensure HUGGINGFACE_API_TOKEN is valid. The API generates based on a detailed description of your photo."
             },
             { status: 500 }
         );
