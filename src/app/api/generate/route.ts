@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
-import { Client } from "@gradio/client";
+import { HfInference } from "@huggingface/inference";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hugging Face Gradio API) ===");
+    console.log("=== API Generate Called (Hugging Face Inference API) ===");
+
+    if (!process.env.HUGGINGFACE_API_TOKEN) {
+        return NextResponse.json(
+            { error: "HUGGINGFACE_API_TOKEN not configured in .env.local" },
+            { status: 500 }
+        );
+    }
 
     try {
         const { image, style, prompt } = await request.json();
@@ -11,102 +18,80 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "No image provided" }, { status: 400 });
         }
 
-        // Prepare the image (convert base64 to blob)
+        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
+
+        // Prepare the image
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
+        const imageBlob = new Blob([imageBuffer]);
 
-        // List of Spaces to try (in order of preference)
-        const spacesToTry = [
-            "akhaliq/AnimeGANv2",  // Anime/cartoon style
-            "Xenova/cartoonify",   // General cartoonization
-            "multimodalart/face-to-sticker", // Face transformation
-        ];
-
-        let lastError = null;
-
-        // Try each Space until one works
-        for (const spaceUrl of spacesToTry) {
-            try {
-                console.log(`Attempting to use Space: ${spaceUrl}`);
-
-                // Connect to the Gradio Space with HF token if available
-                const clientOptions: any = {};
-                if (process.env.HUGGINGFACE_API_TOKEN) {
-                    clientOptions.hf_token = process.env.HUGGINGFACE_API_TOKEN;
-                }
-
-                const client = await Client.connect(spaceUrl, clientOptions);
-
-                // Call the prediction endpoint
-                // Different Spaces have different API signatures, so we try common patterns
-                let result;
-                try {
-                    // Pattern 1: Simple image input
-                    result = await client.predict("/predict", {
-                        image: new Blob([imageBuffer], { type: "image/png" }),
-                    });
-                } catch (e) {
-                    // Pattern 2: Named parameter
-                    result = await client.predict(0, [
-                        new Blob([imageBuffer], { type: "image/png" })
-                    ]);
-                }
-
-                // Extract the output image URL from the result
-                let outputUrl = "";
-
-                if (result && result.data) {
-                    const data = result.data;
-
-                    // Try different response formats
-                    if (Array.isArray(data) && data.length > 0) {
-                        const firstOutput = data[0];
-                        if (typeof firstOutput === 'string') {
-                            outputUrl = firstOutput;
-                        } else if (firstOutput && firstOutput.url) {
-                            outputUrl = firstOutput.url;
-                        } else if (firstOutput && firstOutput.path) {
-                            // Some Spaces return a path that needs to be prefixed
-                            outputUrl = `https://huggingface.co/spaces/${spaceUrl}/resolve/main/${firstOutput.path}`;
-                        }
-                    }
-                }
-
-                if (!outputUrl) {
-                    throw new Error("No output URL in response");
-                }
-
-                console.log(`Success with Space: ${spaceUrl}`);
-
-                // Fetch the image from the URL and convert to base64
-                const imageResponse = await fetch(outputUrl);
-                if (!imageResponse.ok) {
-                    throw new Error("Failed to fetch generated image");
-                }
-
-                const arrayBuffer = await imageResponse.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-
-                return NextResponse.json({ output: base64Image });
-
-            } catch (error: any) {
-                console.warn(`Space ${spaceUrl} failed:`, error.message);
-                lastError = error;
-                // Continue to next Space
-            }
+        // Get description of the person for better prompts
+        let personDescription = "a person";
+        try {
+            const description = await hf.imageToText({
+                data: imageBlob,
+                model: "Salesforce/blip-image-captioning-base",
+            });
+            personDescription = description.generated_text || "a person";
+            console.log("Image described as:", personDescription);
+        } catch (e) {
+            console.warn("Description failed, using default");
         }
 
-        // If all Spaces failed, throw the last error
-        throw new Error(`All Spaces failed. Last error: ${lastError?.message || 'Unknown'}`);
+        // Map styles to prompts
+        let stylePrompt = "";
+        let negativePrompt = "realistic, photo, photograph, photorealistic";
+
+        switch (style) {
+            case "Cartoon 2D":
+                stylePrompt = `${personDescription}, 2d cartoon style, animated, vibrant colors, simple shapes, flat design, vector art, bold outlines, cel shading`;
+                break;
+            case "Cartoon 3D":
+                stylePrompt = `${personDescription}, 3d pixar style, disney character, cgi animation, rendered, smooth surfaces, cute, toy story style`;
+                break;
+            case "Caricatura 2D":
+                stylePrompt = `${personDescription}, caricature drawing, exaggerated features, funny, big head, comic art, hand drawn, sketch style`;
+                break;
+            case "Caricatura Realista":
+                stylePrompt = `${personDescription}, realistic caricature, detailed, exaggerated proportions, professional portrait, hyperrealistic rendering`;
+                negativePrompt = "photo, photograph";
+                break;
+            default:
+                stylePrompt = `${personDescription}, cartoon character`;
+        }
+
+        const fullPrompt = `${stylePrompt}, ${prompt || ""}, high quality, masterpiece, professional art`;
+
+        console.log("Generating with prompt:", fullPrompt);
+
+        // Use Stable Diffusion XL for high quality results
+        // This model is always available on HF Inference API
+        const result = await hf.textToImage({
+            model: "stabilityai/stable-diffusion-xl-base-1.0",
+            inputs: fullPrompt,
+            parameters: {
+                negative_prompt: negativePrompt,
+                num_inference_steps: 30,
+                guidance_scale: 7.5,
+            }
+        });
+
+        // Convert blob to base64
+        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
+
+        console.log("Generation complete");
+
+        return NextResponse.json({ output: base64Image });
 
     } catch (error: any) {
         console.error("Generation Error:", error);
         return NextResponse.json(
             {
                 error: "Failed to generate image",
-                details: error.message,
-                hint: "Hugging Face Spaces might be unavailable. Please ensure HUGGINGFACE_API_TOKEN is set in .env.local"
+                details: error?.message || "Unknown error",
+                hint: "Ensure HUGGINGFACE_API_TOKEN is valid and has access to inference API"
             },
             { status: 500 }
         );
