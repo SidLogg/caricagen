@@ -54,16 +54,15 @@ export async function POST(request: Request) {
 
         console.log("Transforming image with prompt:", fullPrompt);
 
-        // Use IMAGE-TO-IMAGE with SDXL
-        // This preserves the original image structure while applying the style
+        // Use IMAGE-TO-IMAGE with SDXL Base (more reliable than Refiner)
         const result = await hf.imageToImage({
-            model: "stabilityai/stable-diffusion-xl-refiner-1.0",
+            model: "stabilityai/stable-diffusion-xl-base-1.0",
             inputs: imageBlob,
             parameters: {
                 prompt: fullPrompt,
                 negative_prompt: negativePrompt,
-                num_inference_steps: 40,
-                guidance_scale: 8.0,
+                num_inference_steps: 30,
+                guidance_scale: 7.5,
                 strength: 0.75, // 0.75 = strong style transfer while keeping identity
             }
         });
@@ -79,62 +78,6 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error("Generation Error:", error);
-
-        // If SDXL Refiner fails, try with base SDXL
-        if (error.message?.includes("refiner")) {
-            try {
-                console.log("Retrying with base SDXL model...");
-
-                const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
-                const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-                const imageBuffer = Buffer.from(base64Data, 'base64');
-                const imageBlob = new Blob([imageBuffer]);
-
-                let stylePrompt = "";
-                switch (style) {
-                    case "Cartoon 2D":
-                        stylePrompt = "2d cartoon style, animated, vibrant colors, cartoon character";
-                        break;
-                    case "Cartoon 3D":
-                        stylePrompt = "3d pixar style, disney character, 3d cartoon";
-                        break;
-                    case "Caricatura 2D":
-                        stylePrompt = "caricature drawing, exaggerated features, caricature";
-                        break;
-                    case "Caricatura Realista":
-                        stylePrompt = "realistic caricature, exaggerated proportions, caricature art";
-                        break;
-                    default:
-                        stylePrompt = "cartoon character";
-                }
-
-                const result = await hf.imageToImage({
-                    model: "stabilityai/stable-diffusion-xl-base-1.0",
-                    inputs: imageBlob,
-                    parameters: {
-                        prompt: `${stylePrompt}, preserve face identity, maintain facial features`,
-                        negative_prompt: "ugly, blurry, low quality",
-                        strength: 0.7,
-                    }
-                });
-
-                const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
-
-                return NextResponse.json({ output: base64Image });
-
-            } catch (retryError: any) {
-                return NextResponse.json(
-                    {
-                        error: "Failed to generate image",
-                        details: retryError?.message || "Unknown error",
-                        hint: "Hugging Face API might be temporarily unavailable"
-                    },
-                    { status: 500 }
-                );
-            }
-        }
 
         return NextResponse.json(
             {
