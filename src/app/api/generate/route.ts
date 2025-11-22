@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 import * as fal from "@fal-ai/serverless-client";
+import OpenAI from "openai";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Fal.ai) ===");
-    console.log("ENV Check:", {
-        hasToken: !!process.env.FAL_KEY,
-        tokenPrefix: process.env.FAL_KEY?.substring(0, 10)
-    });
+    console.log("=== API Generate Called (Hybrid Free Solution) ===");
 
     if (!process.env.FAL_KEY) {
-        console.error("FAL_KEY is not set");
         return NextResponse.json(
             { error: "FAL_KEY not configured. Get a free key at https://fal.ai/dashboard/keys" },
             { status: 500 }
@@ -22,42 +18,48 @@ export async function POST(request: Request) {
         });
 
         const { image, style, prompt, strength } = await request.json();
-        console.log("Request received:", { style, hasImage: !!image, strength });
+        console.log("Request received:", { style, hasImage: !!image });
 
-        // Upload the base64 image to Fal.ai storage first
-        console.log("Uploading image to Fal.ai storage...");
-        const imageUrl = await fal.storage.upload(image);
-        console.log("Image uploaded to:", imageUrl);
+        // Step 1: Analyze the image using a free vision model (if available)
+        // For now, we'll create a detailed prompt based on common features
 
-        // Map styles to specific prompts
         let stylePrompt = "";
-        let modelToUse = "fal-ai/flux-lora"; // Using FLUX with LoRA for better face preservation
+        let detailedPrompt = "";
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "in the style of a 2d cartoon character, animated, vibrant colors, simple shapes, flat design";
+                stylePrompt = "2d cartoon style, animated, vibrant colors, simple shapes, clean lines, vector art";
+                detailedPrompt = "a person with distinctive facial features in 2d cartoon style, animated character design, bold outlines, flat colors";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "in the style of a 3d pixar character, disney animation, cute, rendered, cgi";
+                stylePrompt = "3d pixar style, disney animation, cute character, rendered, smooth surfaces, cgi";
+                detailedPrompt = "a person with recognizable features as a 3d pixar character, disney style, expressive face, rendered animation";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "in the style of a caricature drawing, exaggerated features, funny, sketch, hand drawn";
+                stylePrompt = "caricature drawing, exaggerated features, funny, hand drawn, sketch style, comic art";
+                detailedPrompt = "a person with exaggerated distinctive facial features, caricature style, humorous, hand drawn sketch";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "in the style of a realistic caricature, detailed, exaggerated proportions, professional art";
+                stylePrompt = "realistic caricature, detailed, subtle exaggeration, professional art, hyperrealistic rendering";
+                detailedPrompt = "a person with slightly exaggerated but realistic features, professional caricature, detailed rendering";
                 break;
             default:
-                stylePrompt = "in the style of a cartoon";
+                stylePrompt = "cartoon style";
+                detailedPrompt = "a person in cartoon style";
         }
 
-        // Create a prompt that describes transforming THIS SPECIFIC person
-        const fullPrompt = `A portrait of this person ${stylePrompt}, same face, same person, ${prompt || "high quality"}`;
+        // Upload image to Fal.ai storage
+        console.log("Uploading reference image...");
+        const imageUrl = await fal.storage.upload(image);
+        console.log("Image uploaded:", imageUrl);
 
-        console.log("Calling Fal.ai with prompt:", fullPrompt);
-        console.log("Using model:", modelToUse);
+        // Use the uploaded image as a reference with IP-Adapter
+        const fullPrompt = `${detailedPrompt}, ${prompt || "high quality, masterpiece"}, professional art, detailed`;
 
-        // Using FLUX with image prompt for better identity preservation
-        const result: any = await fal.subscribe(modelToUse, {
+        console.log("Generating with prompt:", fullPrompt);
+
+        // Try using fal-ai/flux/dev with image prompt for better results
+        const result: any = await fal.subscribe("fal-ai/flux/dev", {
             input: {
                 prompt: fullPrompt,
                 image_url: imageUrl,
@@ -65,20 +67,18 @@ export async function POST(request: Request) {
                 guidance_scale: 3.5,
                 num_images: 1,
                 enable_safety_checker: false,
+                output_format: "jpeg",
             },
             logs: true,
         });
 
-        console.log("Fal.ai response:", JSON.stringify(result, null, 2));
+        console.log("Generation complete");
 
         const outputUrl = result.images?.[0]?.url || result.image?.url;
 
         if (!outputUrl) {
-            console.error("No image URL found in result:", result);
             throw new Error("No image URL in response");
         }
-
-        console.log("Generated image URL:", outputUrl);
 
         return NextResponse.json({ output: outputUrl });
     } catch (error: any) {
@@ -86,14 +86,54 @@ export async function POST(request: Request) {
         console.error("Error details:", {
             message: error?.message,
             body: error?.body,
-            stack: error?.stack
         });
+
+        // If FLUX fails, fallback to fast-sdxl
+        try {
+            console.log("Trying fallback model...");
+            const { image, style, prompt } = await request.json();
+
+            const imageUrl = await fal.storage.upload(image);
+
+            let simplePrompt = "";
+            switch (style) {
+                case "Cartoon 2D":
+                    simplePrompt = "2d cartoon character, animated style";
+                    break;
+                case "Cartoon 3D":
+                    simplePrompt = "3d pixar character, disney style";
+                    break;
+                case "Caricatura 2D":
+                    simplePrompt = "caricature drawing, exaggerated features";
+                    break;
+                case "Caricatura Realista":
+                    simplePrompt = "realistic caricature, detailed";
+                    break;
+                default:
+                    simplePrompt = "cartoon character";
+            }
+
+            const fallbackResult: any = await fal.subscribe("fal-ai/fast-sdxl", {
+                input: {
+                    prompt: `${simplePrompt}, ${prompt || "high quality"}`,
+                    image_url: imageUrl,
+                    strength: 0.75,
+                    num_inference_steps: 25,
+                },
+            });
+
+            const outputUrl = fallbackResult.images?.[0]?.url || fallbackResult.image?.url;
+            if (outputUrl) {
+                return NextResponse.json({ output: outputUrl });
+            }
+        } catch (fallbackError) {
+            console.error("Fallback also failed:", fallbackError);
+        }
 
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Get a free Fal.ai key at https://fal.ai/dashboard/keys"
             },
             { status: 500 }
         );
