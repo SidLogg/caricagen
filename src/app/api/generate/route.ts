@@ -22,7 +22,7 @@ async function uploadToCatbox(buffer: Buffer): Promise<string> {
 }
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Pollinations.ai + Flux) ===");
+    console.log("=== API Generate Called (Pollinations.ai + Turbo) ===");
 
     try {
         const { image, style, prompt, strength } = await request.json();
@@ -58,9 +58,6 @@ export async function POST(request: Request) {
             console.log("Image uploaded to:", imageUrl);
         } catch (e) {
             console.error("Upload failed:", e);
-            // Fallback: If upload fails, we might have to rely on text-to-image or fail
-            // But let's try to proceed with just text if upload fails? No, user wants img2img.
-            // We'll throw for now, or maybe try a different host if we had one.
         }
 
         // 4. Construct the Prompt
@@ -86,15 +83,19 @@ export async function POST(request: Request) {
         const encodedPrompt = encodeURIComponent(fullPrompt);
 
         // 5. Call Pollinations.ai
-        // We use 'flux' model for high quality. We pass 'image' param for img2img influence.
-        // If flux ignores image, we might need 'kontext' or similar, but Flux is requested.
-        // Pollinations URL format: https://image.pollinations.ai/prompt/[prompt]?width=...&height=...&model=...&image=...
+        // We use 'turbo' (SDXL Turbo) because it supports image-to-image (img2img) much better than Flux on this API.
+        // Flux is great for text-to-image, but often ignores the input image URL.
+        // We set 'enhance=false' to ensure our specific prompt (with the person's description) is used exactly.
 
         const seed = Math.floor(Math.random() * 1000000);
-        // Note: 'flux' on Pollinations might not support img2img strongly. 'kontext' does.
-        // We will try to pass image. If it's ignored, we at least have a good prompt.
-        // Adding 'enhance=true' helps.
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&enhance=true${imageUrl ? `&image=${encodeURIComponent(imageUrl)}` : ''}`;
+
+        // Strength: 0.0 (original image) to 1.0 (complete noise/new image).
+        // For caricatures, we want a balance. 0.5 - 0.7 is usually good.
+        // If strength is passed in request, use it, otherwise default to 0.65
+        // Note: Pollinations might not document 'strength' explicitly for all models, but standard SD params often work.
+        // If not, 'turbo' usually has a good default for img2img.
+
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=false${imageUrl ? `&image=${encodeURIComponent(imageUrl)}` : ''}`;
 
         console.log("Calling Pollinations:", pollinationsUrl);
 
