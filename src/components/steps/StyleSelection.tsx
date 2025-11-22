@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
 import { Upload, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Style } from '@/lib/mockAI';
+import { Style } from '@/lib/ai';
 
 interface StyleSelectionProps {
     onNext: (style: Style, files: File[]) => void;

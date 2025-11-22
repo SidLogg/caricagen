@@ -39,7 +39,7 @@ export async function generateInitial(style: Style, files: File[]): Promise<Gene
 
         const data = await response.json();
 
-        // Replicate returns an array of outputs usually, or a single string
+        // API returns { output: base64String }
         const outputUrl = Array.isArray(data.output) ? data.output[0] : data.output;
 
         return {
@@ -65,7 +65,7 @@ export async function updateFacial(currentImage: string, exaggeration: number, p
             },
             body: JSON.stringify({
                 image: currentImage,
-                style: "Caricatura 2D", // We can infer this or pass it through
+                style: "Caricatura 2D", // We can infer this or pass it through if needed
                 prompt: `facial features, ${prompt}`,
                 strength,
             }),

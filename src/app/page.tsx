@@ -6,7 +6,7 @@ import StyleSelection from '@/components/steps/StyleSelection';
 import FacialControls from '@/components/steps/FacialControls';
 import BodyControls from '@/components/steps/BodyControls';
 import DownloadSection from '@/components/steps/DownloadSection';
-import { generateInitial, updateFacial, updateBody, Style } from '@/lib/mockAI';
+import { generateInitial, updateFacial, updateBody, Style } from '@/lib/ai';
 import { Loader2 } from 'lucide-react';
 
 type Step = 1 | 2 | 3 | 4;

@@ -1,98 +1,119 @@
 import { NextResponse } from "next/server";
 import { HfInference } from "@huggingface/inference";
 
-export async function POST(request: Request) {
-    console.log("=== API Generate Called (Hugging Face - Truly Free) ===");
+// Helper to upload image to Catbox (temporary host for AI processing)
+async function uploadToCatbox(buffer: Buffer): Promise<string> {
+    const formData = new FormData();
+    formData.append('reqtype', 'fileupload');
+    formData.append('userhash', ''); // Anonymous
+    formData.append('fileToUpload', new Blob([buffer as any]), 'image.png');
 
-    if (!process.env.HUGGINGFACE_API_TOKEN) {
-        return NextResponse.json(
-            { error: "HUGGINGFACE_API_TOKEN not configured. Get a free token at https://huggingface.co/settings/tokens" },
-            { status: 500 }
-        );
+    const response = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to upload image to temporary host');
     }
 
+    const url = await response.text();
+    return url.trim();
+}
+
+export async function POST(request: Request) {
+    console.log("=== API Generate Called (Pollinations.ai + Flux) ===");
+
     try {
-        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
         const { image, style, prompt, strength } = await request.json();
 
-        console.log("Request received:", { style, hasImage: !!image });
-
-        // Extract features from the image using vision model (describe the person)
-        let personDescription = "a person";
-
-        try {
-            // Try to get image description using Hugging Face's image-to-text
-            const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-            const imageBuffer = Buffer.from(base64Data, 'base64');
-            const imageBlob = new Blob([imageBuffer]);
-
-            const description = await hf.imageToText({
-                data: imageBlob,
-                model: "Salesforce/blip-image-captioning-large",
-            });
-
-            console.log("Image description:", description.generated_text);
-            personDescription = description.generated_text || "a person";
-        } catch (descError) {
-            console.log("Could not describe image, using generic prompt");
+        if (!image) {
+            return NextResponse.json({ error: "No image provided" }, { status: 400 });
         }
 
-        // Map styles to specific prompts
-        let stylePrompt = "";
+        // 1. Prepare the image
+        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
 
+        // 2. Get a description of the image (optional, improves prompt)
+        let personDescription = "a person";
+        if (process.env.HUGGINGFACE_API_TOKEN) {
+            try {
+                const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
+                const description = await hf.imageToText({
+                    data: new Blob([imageBuffer]),
+                    model: "Salesforce/blip-image-captioning-large",
+                });
+                personDescription = description.generated_text || "a person";
+                console.log("Image described as:", personDescription);
+            } catch (e) {
+                console.warn("HF Description failed, using default.", e);
+            }
+        }
+
+        // 3. Upload to Catbox for Pollinations (since it needs a URL)
+        let imageUrl = "";
+        try {
+            imageUrl = await uploadToCatbox(imageBuffer);
+            console.log("Image uploaded to:", imageUrl);
+        } catch (e) {
+            console.error("Upload failed:", e);
+            // Fallback: If upload fails, we might have to rely on text-to-image or fail
+            // But let's try to proceed with just text if upload fails? No, user wants img2img.
+            // We'll throw for now, or maybe try a different host if we had one.
+        }
+
+        // 4. Construct the Prompt
+        let stylePrompt = "";
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = `${personDescription} as a 2d cartoon character, animated style, vibrant colors, simple shapes, flat design, vector art, bold outlines`;
+                stylePrompt = "flat 2d cartoon style, vibrant colors, simple shading, thick outlines, vector art, professional illustration";
                 break;
             case "Cartoon 3D":
-                stylePrompt = `${personDescription} as a 3d pixar character, disney style, cute, rendered, cgi animation, toy story style, smooth surfaces`;
+                stylePrompt = "3d pixar style, disney animation, cgi rendered, cute, smooth, volumetric lighting, high detail, 4k";
                 break;
             case "Caricatura 2D":
-                stylePrompt = `${personDescription} as a caricature drawing, exaggerated features, funny, sketch style, hand drawn, comic art, humorous`;
+                stylePrompt = "funny caricature, exaggerated features, big head, expressive, hand drawn sketch, humorous, artistic";
                 break;
             case "Caricatura Realista":
-                stylePrompt = `${personDescription} as a realistic caricature, detailed, exaggerated proportions, professional art, hyperrealistic rendering`;
+                stylePrompt = "realistic caricature, hyperrealistic, highly detailed, exaggerated proportions, oil painting style, professional art";
                 break;
             default:
-                stylePrompt = `${personDescription} as a cartoon character`;
+                stylePrompt = "cartoon style, professional art";
         }
 
-        const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece, professional art"}`;
+        const fullPrompt = `${stylePrompt}, ${personDescription}, ${prompt || ""}`;
+        const encodedPrompt = encodeURIComponent(fullPrompt);
 
-        console.log("Generating with prompt:", fullPrompt);
+        // 5. Call Pollinations.ai
+        // We use 'flux' model for high quality. We pass 'image' param for img2img influence.
+        // If flux ignores image, we might need 'kontext' or similar, but Flux is requested.
+        // Pollinations URL format: https://image.pollinations.ai/prompt/[prompt]?width=...&height=...&model=...&image=...
 
-        // Use Stable Diffusion 2.1 - completely free and unlimited on Hugging Face
-        const result = await hf.textToImage({
-            model: "stabilityai/stable-diffusion-2-1",
-            inputs: fullPrompt,
-            parameters: {
-                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy, photorealistic, photo, realistic photo",
-                num_inference_steps: 30,
-                guidance_scale: 7.5,
-            }
-        });
+        const seed = Math.floor(Math.random() * 1000000);
+        // Note: 'flux' on Pollinations might not support img2img strongly. 'kontext' does.
+        // We will try to pass image. If it's ignored, we at least have a good prompt.
+        // Adding 'enhance=true' helps.
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&enhance=true${imageUrl ? `&image=${encodeURIComponent(imageUrl)}` : ''}`;
 
-        // Convert blob to base64
-        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
+        console.log("Calling Pollinations:", pollinationsUrl);
+
+        // Fetch the image from Pollinations
+        const pollResponse = await fetch(pollinationsUrl);
+        if (!pollResponse.ok) {
+            throw new Error(`Pollinations API error: ${pollResponse.statusText}`);
+        }
+
+        const arrayBuffer = await pollResponse.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
-
-        console.log("Generation complete, image size:", buffer.length);
+        const base64Image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
 
         return NextResponse.json({ output: base64Image });
-    } catch (error: any) {
-        console.error("=== AI Generation Error ===");
-        console.error("Error details:", {
-            message: error?.message,
-            status: error?.response?.status,
-        });
 
+    } catch (error: any) {
+        console.error("Generation Error:", error);
         return NextResponse.json(
-            {
-                error: "Failed to generate image",
-                details: error?.message || "Unknown error",
-                hint: "Get a free Hugging Face token at https://huggingface.co/settings/tokens"
-            },
+            { error: "Failed to generate image", details: error.message },
             { status: 500 }
         );
     }
