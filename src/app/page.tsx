@@ -15,6 +15,7 @@ export default function Home() {
     const [step, setStep] = useState<Step>(1);
     const [isLoading, setIsLoading] = useState(false);
     const [currentImage, setCurrentImage] = useState<string>('');
+    const [originalImage, setOriginalImage] = useState<string>(''); // Store the original photo
 
     // State for generation params (unused in mock but good for structure)
     const [selectedStyle, setSelectedStyle] = useState<Style | null>(null);
@@ -23,6 +24,11 @@ export default function Home() {
         setIsLoading(true);
         setSelectedStyle(style);
         try {
+            // Save the original image for future reference (base64)
+            const reader = new FileReader();
+            reader.onload = (e) => setOriginalImage(e.target?.result as string);
+            reader.readAsDataURL(files[0]);
+
             const result = await generateInitial(style, files);
             setCurrentImage(result.imageUrl);
             setStep(2);
@@ -40,10 +46,12 @@ export default function Home() {
     };
 
     const handleFacialUpdate = async (exaggeration: number, prompt: string) => {
-        // In a real app, this might debounce and update the preview
-        // For now, mockAI.updateFacial just returns the image, so we don't need to await it for the UI to feel responsive
-        // But let's simulate a quick update
-        const newImage = await updateFacial(currentImage, exaggeration, prompt);
+        // CRITICAL FIX: Always use the ORIGINAL image as the source, not the current cartoon.
+        // This prevents the "degradation loop" where the image gets worse and worse.
+        if (!originalImage) return;
+
+        // We show a loading state or just let the image update
+        const newImage = await updateFacial(originalImage, exaggeration, prompt);
         setCurrentImage(newImage);
     };
 
@@ -52,13 +60,17 @@ export default function Home() {
     };
 
     const handleBodyUpdate = async (exaggeration: number, prompt: string) => {
-        const newImage = await updateBody(currentImage, exaggeration, prompt);
+        // CRITICAL FIX: Always use the ORIGINAL image as the source.
+        if (!originalImage) return;
+
+        const newImage = await updateBody(originalImage, exaggeration, prompt);
         setCurrentImage(newImage);
     };
 
     const handleReset = () => {
         setStep(1);
         setCurrentImage('');
+        setOriginalImage('');
         setSelectedStyle(null);
     };
 

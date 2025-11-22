@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
 import { ArrowRight, RefreshCw } from 'lucide-react';
@@ -16,8 +16,15 @@ export default function FacialControls({ image, onNext, onUpdate }: FacialContro
     const [prompt, setPrompt] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
+    const isFirstRender = useRef(true);
+
     // Debounce update to simulate real-time preview
     useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return;
+        }
+
         const timer = setTimeout(() => {
             setIsUpdating(true);
             onUpdate(exaggeration, prompt);

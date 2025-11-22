@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 
 interface BodyControlsProps {
@@ -14,7 +14,14 @@ export default function BodyControls({ image, onNext, onUpdate }: BodyControlsPr
     const [prompt, setPrompt] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
+    const isFirstRender = useRef(true);
+
     useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return;
+        }
+
         const timer = setTimeout(() => {
             setIsUpdating(true);
             onUpdate(exaggeration, prompt);
