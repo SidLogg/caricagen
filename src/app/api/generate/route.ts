@@ -91,14 +91,23 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error("Fal.ai Generation Error:", error);
+        console.error("Error details:", {
+            message: error?.message,
+            status: error?.status,
+            body: error?.body,
+            stack: error?.stack
+        });
 
         return NextResponse.json(
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Fal.ai error. Check if FAL_KEY is valid and you have credits. Get free key at https://fal.ai/dashboard/keys"
+                status: error?.status || 500,
+                hint: error?.status === 403
+                    ? "API key is invalid or expired. Get a new key at https://fal.ai/dashboard/keys"
+                    : "Fal.ai error. Check console logs for details."
             },
-            { status: 500 }
+            { status: error?.status || 500 }
         );
     }
 }
