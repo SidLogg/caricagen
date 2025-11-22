@@ -5,38 +5,68 @@ export interface GenerationResult {
     style: Style;
 }
 
-const MOCK_IMAGES = {
-    'Cartoon 2D': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
-    'Cartoon 3D': 'https://api.dicebear.com/7.x/adventurer/svg?seed=Felix',
-    'Caricatura 2D': 'https://api.dicebear.com/7.x/big-smile/svg?seed=Felix',
-    'Caricatura Realista': 'https://api.dicebear.com/7.x/micah/svg?seed=Felix',
+// Helper to convert File to Base64
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (error) => reject(error);
+    });
 };
 
 export async function generateInitial(style: Style, files: File[]): Promise<GenerationResult> {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            resolve({
-                imageUrl: MOCK_IMAGES[style],
+    try {
+        // Convert first file to base64
+        const imageBase64 = await fileToBase64(files[0]);
+
+        const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                image: imageBase64,
                 style,
-            });
-        }, 2000); // Simulate 2s delay
-    });
+                prompt: "best quality, masterpiece",
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to generate image');
+        }
+
+        const data = await response.json();
+
+        // Replicate returns an array of outputs usually, or a single string
+        const outputUrl = Array.isArray(data.output) ? data.output[0] : data.output;
+
+        return {
+            imageUrl: outputUrl,
+            style,
+        };
+    } catch (error) {
+        console.error("Generation failed:", error);
+        // Fallback to mock if API fails (e.g. no key configured) so the app doesn't crash during demo
+        console.warn("Falling back to mock data due to API error");
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                resolve({
+                    imageUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + Math.random(),
+                    style,
+                });
+            }, 1000);
+        });
+    }
 }
 
 export async function updateFacial(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            // In a real app, this would send the params to the backend.
-            // Here we just return the same image or a slightly modified one if we had one.
-            resolve(currentImage);
-        }, 1000);
-    });
+    // For now, we'll just return the current image as re-generation is expensive/complex
+    // In a full implementation, this would call the API again with img2img
+    return currentImage;
 }
 
 export async function updateBody(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            resolve(currentImage);
-        }, 1000);
-    });
+    return currentImage;
 }
