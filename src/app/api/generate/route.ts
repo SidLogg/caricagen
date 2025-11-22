@@ -31,53 +31,54 @@ export async function POST(request: Request) {
 
         // Map styles to specific prompts
         let stylePrompt = "";
+        let modelToUse = "fal-ai/flux-lora"; // Using FLUX with LoRA for better face preservation
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon character, animated style, vibrant colors, simple shapes, flat design, vector art";
+                stylePrompt = "in the style of a 2d cartoon character, animated, vibrant colors, simple shapes, flat design";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar character, disney style, cute, rendered, cgi animation, toy story style";
+                stylePrompt = "in the style of a 3d pixar character, disney animation, cute, rendered, cgi";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated features, funny, sketch style, hand drawn, comic style";
+                stylePrompt = "in the style of a caricature drawing, exaggerated features, funny, sketch, hand drawn";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, detailed, exaggerated proportions, professional art, hyperrealistic";
+                stylePrompt = "in the style of a realistic caricature, detailed, exaggerated proportions, professional art";
                 break;
             default:
-                stylePrompt = "cartoon character";
+                stylePrompt = "in the style of a cartoon";
         }
 
-        const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece"}`;
-
-        // Strength: 0 = identical to input, 1 = completely new
-        // We want high strength for caricature effect but still preserve identity
-        const imageStrength = strength ? strength / 100 * 0.6 + 0.2 : 0.5; // Range: 0.2-0.8
+        // Create a prompt that describes transforming THIS SPECIFIC person
+        const fullPrompt = `A portrait of this person ${stylePrompt}, same face, same person, ${prompt || "high quality"}`;
 
         console.log("Calling Fal.ai with prompt:", fullPrompt);
-        console.log("Image strength:", imageStrength);
+        console.log("Using model:", modelToUse);
 
-        // Using Fal.ai's SDXL with image-to-image (completely free)
-        const result: any = await fal.subscribe("fal-ai/fast-sdxl", {
+        // Using FLUX with image prompt for better identity preservation
+        const result: any = await fal.subscribe(modelToUse, {
             input: {
                 prompt: fullPrompt,
                 image_url: imageUrl,
-                strength: imageStrength,
-                num_inference_steps: 30,
-                guidance_scale: 7.5,
-                negative_prompt: "ugly, blurry, low quality, distorted, deformed, bad anatomy, photorealistic, photo",
+                num_inference_steps: 28,
+                guidance_scale: 3.5,
+                num_images: 1,
+                enable_safety_checker: false,
             },
             logs: true,
         });
 
-        console.log("Fal.ai response:", result);
+        console.log("Fal.ai response:", JSON.stringify(result, null, 2));
 
         const outputUrl = result.images?.[0]?.url || result.image?.url;
 
         if (!outputUrl) {
+            console.error("No image URL found in result:", result);
             throw new Error("No image URL in response");
         }
+
+        console.log("Generated image URL:", outputUrl);
 
         return NextResponse.json({ output: outputUrl });
     } catch (error: any) {
