@@ -48,16 +48,7 @@ export async function generateInitial(style: Style, files: File[]): Promise<Gene
         };
     } catch (error) {
         console.error("Generation failed:", error);
-        // Fallback to mock if API fails (e.g. no key configured) so the app doesn't crash during demo
-        console.warn("Falling back to mock data due to API error");
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                resolve({
-                    imageUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + Math.random(),
-                    style,
-                });
-            }, 1000);
-        });
+        throw error;
     }
 }
 

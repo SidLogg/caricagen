@@ -28,6 +28,7 @@ export default function Home() {
             setStep(2);
         } catch (error) {
             console.error(error);
+            alert("Erro ao gerar imagem. Verifique se a chave da API está configurada corretamente no Vercel (REPLICATE_API_TOKEN).");
         } finally {
             setIsLoading(false);
         }
