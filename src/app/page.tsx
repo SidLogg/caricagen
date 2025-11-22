@@ -26,9 +26,10 @@ export default function Home() {
             const result = await generateInitial(style, files);
             setCurrentImage(result.imageUrl);
             setStep(2);
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert("Erro ao gerar imagem. Verifique se a chave da API está configurada corretamente no Vercel (REPLICATE_API_TOKEN).");
+            const errorMessage = error?.message || "Erro desconhecido";
+            alert(`Erro ao gerar imagem: ${errorMessage}\n\nVerifique os logs do Vercel para mais detalhes.`);
         } finally {
             setIsLoading(false);
         }
