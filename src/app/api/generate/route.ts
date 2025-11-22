@@ -22,7 +22,7 @@ async function uploadToCatbox(buffer: Buffer): Promise<string> {
 }
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Pollinations.ai + Turbo) ===");
+    console.log("=== API Generate Called (Pollinations.ai + Kontext) ===");
 
     try {
         const { image, style, prompt, strength } = await request.json();
@@ -83,19 +83,22 @@ export async function POST(request: Request) {
         const encodedPrompt = encodeURIComponent(fullPrompt);
 
         // 5. Call Pollinations.ai
-        // We use 'turbo' (SDXL Turbo) because it supports image-to-image (img2img) much better than Flux on this API.
-        // Flux is great for text-to-image, but often ignores the input image URL.
-        // We set 'enhance=false' to ensure our specific prompt (with the person's description) is used exactly.
+        // We use 'kontext' model as it is specifically documented for image-to-image (img2img) on Pollinations.
+        // This should respect the input image much more than 'flux' or 'turbo'.
 
         const seed = Math.floor(Math.random() * 1000000);
 
         // Strength: 0.0 (original image) to 1.0 (complete noise/new image).
-        // For caricatures, we want a balance. 0.5 - 0.7 is usually good.
-        // If strength is passed in request, use it, otherwise default to 0.65
-        // Note: Pollinations might not document 'strength' explicitly for all models, but standard SD params often work.
-        // If not, 'turbo' usually has a good default for img2img.
+        // While undocumented for 'kontext', passing it might help if the backend supports it.
+        // We default to 0.5 for a balance of style and identity.
+        const imgStrength = strength ? strength / 100 : 0.5;
 
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=false${imageUrl ? `&image=${encodeURIComponent(imageUrl)}` : ''}`;
+        // We append specific instructions to preserve identity
+        const identityPrompt = "preserve facial features, retain identity, strong resemblance to input image";
+        const finalPrompt = `${encodedPrompt}, ${identityPrompt}`;
+
+        // Note: We pass 'model=kontext' for img2img.
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${finalPrompt}?width=1024&height=1024&seed=${seed}&model=kontext&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}&strength=${imgStrength}`;
 
         console.log("Calling Pollinations:", pollinationsUrl);
 
