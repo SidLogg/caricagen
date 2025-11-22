@@ -69,7 +69,7 @@ export default function Home() {
                     <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold">
                         C
                     </div>
-                    <h1 className="font-bold text-xl tracking-tight">Caricagen AI</h1>
+                    <h1 className="font-bold text-xl tracking-tight">Caricagen AI <span className="text-xs bg-primary/20 text-primary px-2 py-1 rounded ml-2">v1.1</span></h1>
                 </div>
                 <div className="flex gap-2 text-sm font-medium text-muted-foreground">
                     <span className={step >= 1 ? "text-primary" : ""}>1. Estilo</span>
