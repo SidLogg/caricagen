@@ -1,25 +1,23 @@
 import { NextResponse } from "next/server";
-import Replicate from "replicate";
+import { HfInference } from "@huggingface/inference";
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called ===");
+    console.log("=== API Generate Called (Hugging Face) ===");
     console.log("ENV Check:", {
-        hasToken: !!process.env.REPLICATE_API_TOKEN,
-        tokenPrefix: process.env.REPLICATE_API_TOKEN?.substring(0, 5)
+        hasToken: !!process.env.HUGGINGFACE_API_TOKEN,
+        tokenPrefix: process.env.HUGGINGFACE_API_TOKEN?.substring(0, 5)
     });
 
-    if (!process.env.REPLICATE_API_TOKEN) {
-        console.error("REPLICATE_API_TOKEN is not set");
+    if (!process.env.HUGGINGFACE_API_TOKEN) {
+        console.error("HUGGINGFACE_API_TOKEN is not set");
         return NextResponse.json(
-            { error: "REPLICATE_API_TOKEN not configured in Vercel Environment Variables" },
+            { error: "HUGGINGFACE_API_TOKEN not configured. Get a free token at https://huggingface.co/settings/tokens" },
             { status: 500 }
         );
     }
 
     try {
-        const replicate = new Replicate({
-            auth: process.env.REPLICATE_API_TOKEN,
-        });
+        const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
         const { image, style, prompt } = await request.json();
         console.log("Request received:", { style, hasImage: !!image });
@@ -29,42 +27,43 @@ export async function POST(request: Request) {
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = "2d cartoon character, animated style, vibrant colors, simple shapes";
+                stylePrompt = "2d cartoon character, animated style, vibrant colors, simple shapes, flat design";
                 break;
             case "Cartoon 3D":
-                stylePrompt = "3d pixar character, disney style, cute, rendered";
+                stylePrompt = "3d pixar character, disney style, cute, rendered, cgi animation";
                 break;
             case "Caricatura 2D":
-                stylePrompt = "caricature drawing, exaggerated features, funny, sketch style";
+                stylePrompt = "caricature drawing, exaggerated features, funny, sketch style, hand drawn";
                 break;
             case "Caricatura Realista":
-                stylePrompt = "realistic caricature, detailed, exaggerated proportions";
+                stylePrompt = "realistic caricature, detailed, exaggerated proportions, professional art";
                 break;
             default:
                 stylePrompt = "cartoon character";
         }
 
-        const fullPrompt = `${stylePrompt}, ${prompt || "high quality"}`;
+        const fullPrompt = `${stylePrompt}, ${prompt || "high quality, masterpiece"}`;
 
-        console.log("Calling Replicate with prompt:", fullPrompt);
+        console.log("Calling Hugging Face with prompt:", fullPrompt);
 
-        // Using a simpler, more reliable model
-        const output = await replicate.run(
-            "tencentarc/photomaker:ddfc2b08d209f9fa8c1eca692712918bd449f695dabb4a958da31802a9570fe4",
-            {
-                input: {
-                    prompt: fullPrompt,
-                    input_image: image,
-                    num_steps: 20,
-                    style_strength_ratio: 20,
-                    num_outputs: 1,
-                }
+        // Using Stable Diffusion XL - completely free on Hugging Face
+        const result = await hf.textToImage({
+            model: "stabilityai/stable-diffusion-xl-base-1.0",
+            inputs: fullPrompt,
+            parameters: {
+                negative_prompt: "ugly, blurry, low quality, distorted",
+                num_inference_steps: 30,
             }
-        );
+        });
 
-        console.log("Replicate response:", output);
+        // Convert blob to base64
+        const arrayBuffer = await (result as unknown as Blob).arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Image = `data:image/png;base64,${buffer.toString('base64')}`;
 
-        return NextResponse.json({ output });
+        console.log("Hugging Face response received, image size:", buffer.length);
+
+        return NextResponse.json({ output: base64Image });
     } catch (error: any) {
         console.error("=== AI Generation Error ===");
         console.error("Error details:", {
@@ -78,7 +77,7 @@ export async function POST(request: Request) {
             {
                 error: "Failed to generate image",
                 details: error?.message || "Unknown error",
-                hint: "Check Vercel Function Logs for more details"
+                hint: "Get a free Hugging Face token at https://huggingface.co/settings/tokens"
             },
             { status: 500 }
         );
