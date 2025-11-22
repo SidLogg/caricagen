@@ -43,13 +43,14 @@ export async function POST(request: Request) {
             try {
                 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
                 // Try a lighter/different model if BLIP fails
+                // We use the 'base' model which is often more available than 'large'
                 const description = await hf.imageToText({
                     data: new Blob([imageBuffer]),
-                    model: "nlpconnect/vit-gpt2-image-captioning",
+                    model: "Salesforce/blip-image-captioning-base",
                 });
                 if (description.generated_text) {
                     personDescription = description.generated_text;
-                    console.log("Image described as:", personDescription);
+                    console.log("Image described as (BLIP-Base):", personDescription);
                 }
             } catch (e) {
                 console.warn("HF Description failed, using fallback prompt.", e);
