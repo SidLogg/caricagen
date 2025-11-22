@@ -22,7 +22,7 @@ async function uploadToCatbox(buffer: Buffer): Promise<string> {
 }
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Pollinations.ai + Turbo) ===");
+    console.log("=== API Generate Called (Pollinations.ai + Kontext/Turbo) ===");
 
     try {
         const { image, style, prompt, strength } = await request.json();
@@ -36,14 +36,11 @@ export async function POST(request: Request) {
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
         // 2. Get a description of the image (Crucial for identity)
-        // We try a more reliable model or fallback gracefully
         let personDescription = "a person with distinct facial features";
 
         if (process.env.HUGGINGFACE_API_TOKEN) {
             try {
                 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
-                // Try a lighter/different model if BLIP fails
-                // We use the 'base' model which is often more available than 'large'
                 const description = await hf.imageToText({
                     data: new Blob([imageBuffer]),
                     model: "Salesforce/blip-image-captioning-base",
@@ -54,7 +51,6 @@ export async function POST(request: Request) {
                 }
             } catch (e) {
                 console.warn("HF Description failed, using fallback prompt.", e);
-                // Fallback: We don't have a description, so we rely heavily on the image URL
             }
         }
 
@@ -69,6 +65,7 @@ export async function POST(request: Request) {
         }
 
         // 4. Construct the Prompt
+        // STRATEGY: Description FIRST, then Style, then Identity enforcement.
         let stylePrompt = "";
         switch (style) {
             case "Cartoon 2D":
@@ -87,26 +84,30 @@ export async function POST(request: Request) {
                 stylePrompt = "cartoon style, professional art";
         }
 
-        // We construct a prompt that emphasizes the person's description AND the style
-        const fullPrompt = `${stylePrompt}, ${personDescription}, ${prompt || ""}, preserve facial features, retain identity, strong resemblance to input image`;
+        const fullPrompt = `${personDescription}, ${stylePrompt}, ${prompt || ""}, preserve facial features, retain identity, strong resemblance to input image`;
         const encodedPrompt = encodeURIComponent(fullPrompt);
-
-        // 5. Call Pollinations.ai
-        // We revert to 'turbo' because 'kontext' crashed (500). 'turbo' is reliable for img2img.
-        // We remove 'strength' as it might have caused the crash or be unsupported.
-        // We keep 'enhance=false' to strictly follow our prompt (especially the description).
-
         const seed = Math.floor(Math.random() * 1000000);
 
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
+        // 5. Call Pollinations.ai
+        // Attempt 1: Use 'kontext' (The specific img2img model). 
+        // We DO NOT pass 'strength' as it causes crashes on this endpoint.
+        // We rely on the model's default behavior which should be good for img2img.
 
-        console.log("Calling Pollinations:", pollinationsUrl);
+        let pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=kontext&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
 
-        // Fetch the image from Pollinations
-        const pollResponse = await fetch(pollinationsUrl);
+        console.log("Attempting Primary Model (Kontext):", pollinationsUrl);
+
+        let pollResponse = await fetch(pollinationsUrl);
+
+        // Fallback: If Kontext fails (500 or other), try Turbo
         if (!pollResponse.ok) {
-            // If turbo fails, try flux as a last resort fallback?
-            // But let's just report the error for now.
+            console.warn(`Kontext failed (${pollResponse.status}), falling back to Turbo...`);
+            pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&enhance=false&image=${encodeURIComponent(imageUrl)}`;
+            console.log("Attempting Fallback Model (Turbo):", pollinationsUrl);
+            pollResponse = await fetch(pollinationsUrl);
+        }
+
+        if (!pollResponse.ok) {
             throw new Error(`Pollinations API error: ${pollResponse.statusText}`);
         }
 
