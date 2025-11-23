@@ -11,7 +11,7 @@ interface FacialControlsProps {
 }
 
 export default function FacialControls({ image, onNext, onUpdate, onBack }: FacialControlsProps) {
-    const [exaggeration, setExaggeration] = useState(20);
+    const [exaggeration, setExaggeration] = useState(40); // Start at moderate level
     const [prompt, setPrompt] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
@@ -22,12 +22,12 @@ export default function FacialControls({ image, onNext, onUpdate, onBack }: Faci
     };
 
     const getExaggerationLabel = (val: number) => {
-        if (val === 0) return 'Nenhum';
-        if (val <= 20) return 'Super Leve';
-        if (val <= 40) return 'Leve';
-        if (val <= 60) return 'Moderada';
-        if (val <= 80) return 'Exagerada';
-        return 'Super Exagerada';
+        if (val === 0) return 'Natural (Sem Exagero)';
+        if (val < 20) return 'Muito Sutil';
+        if (val < 40) return 'Suave';
+        if (val < 60) return 'Moderado';
+        if (val < 80) return 'Forte';
+        return 'Extremo';
     };
 
     return (
@@ -67,6 +67,7 @@ export default function FacialControls({ image, onNext, onUpdate, onBack }: Faci
                         type="range"
                         min="0"
                         max="100"
+                        step="5"
                         value={exaggeration}
                         onChange={(e) => setExaggeration(Number(e.target.value))}
                         onMouseUp={handleUpdate} // Trigger update when user releases slider
@@ -74,17 +75,18 @@ export default function FacialControls({ image, onNext, onUpdate, onBack }: Faci
                         className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>0%</span>
-                        <span>100%</span>
+                        <span>0% Natural</span>
+                        <span>50% Moderado</span>
+                        <span>100% Extremo</span>
                     </div>
                 </div>
 
                 <div className="space-y-2">
-                    <label className="font-medium">Prompt Adicional (Opcional)</label>
+                    <label className="font-medium">Descreva as mudanças desejadas (Opcional)</label>
                     <textarea
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="Ex: Sorriso mais largo, olhos brilhantes..."
+                        placeholder="Ex: sorriso largo, olhos azuis brilhantes, cabelo loiro, óculos de sol, barba ruiva..."
                         className="w-full p-3 rounded-lg border bg-background min-h-[100px] focus:ring-2 focus:ring-primary outline-none"
                     />
                     <button

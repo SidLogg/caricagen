@@ -13,24 +13,91 @@ interface DownloadSectionProps {
 type Format = 'BITMAP' | 'PDF' | 'VECTOR_BW' | 'VECTOR_COLOR';
 
 const FORMATS: { id: Format; label: string; desc: string; icon: any }[] = [
-    { id: 'BITMAP', label: 'BITMAP', desc: 'JPG, PNG, 300dpi HD', icon: FileImage },
-    { id: 'PDF', label: 'PDF', desc: 'Alta resolução', icon: FileText },
-    { id: 'VECTOR_BW', label: 'VETOR P/B', desc: '.CDR/.AI Preto e Branco', icon: PenTool },
-    { id: 'VECTOR_COLOR', label: 'VETOR COLORIDO', desc: '.CDR/.AI Colorido HD', icon: PenTool },
+    { id: 'BITMAP', label: 'PNG HD', desc: 'Imagem em alta resolução (2x)', icon: FileImage },
+    { id: 'PDF', label: 'PDF', desc: 'PNG HD + instruções para PDF', icon: FileText },
+    { id: 'VECTOR_BW', label: 'VETOR P/B', desc: 'PNG HD + instruções para vetorizar', icon: PenTool },
+    { id: 'VECTOR_COLOR', label: 'VETOR COLORIDO', desc: 'PNG HD + instruções para vetorizar', icon: PenTool },
 ];
 
 export default function DownloadSection({ image, onReset, onBack }: DownloadSectionProps) {
     const [selectedFormat, setSelectedFormat] = useState<Format | null>(null);
     const [isDownloading, setIsDownloading] = useState(false);
 
-    const handleDownload = () => {
-        if (!selectedFormat) return;
+    const downloadImage = (dataUrl: string, filename: string) => {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const upscaleImage = (base64Image: string, scale: number = 2): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'Anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error('Canvas context not available'));
+                    return;
+                }
+
+                // Upscale the image
+                canvas.width = img.width * scale;
+                canvas.height = img.height * scale;
+
+                // Use better image smoothing
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/png', 1.0));
+            };
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = base64Image;
+        });
+    };
+
+    const handleDownload = async () => {
+        if (!selectedFormat || !image) return;
         setIsDownloading(true);
 
-        setTimeout(() => {
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            
+            if (selectedFormat === 'BITMAP') {
+                // Download high-res PNG (2x upscale)
+                const upscaled = await upscaleImage(image, 2);
+                downloadImage(upscaled, `caricatura-hd-${timestamp}.png`);
+                
+            } else if (selectedFormat === 'PDF') {
+                // Download as high-res PNG with note
+                const upscaled = await upscaleImage(image, 2);
+                downloadImage(upscaled, `caricatura-hd-${timestamp}.png`);
+                setTimeout(() => {
+                    alert('✅ Download concluído!\n\n💡 Dica: Para converter para PDF, use um conversor online como "PNG to PDF" ou abra a imagem e salve como PDF.');
+                }, 500);
+                
+            } else if (selectedFormat === 'VECTOR_BW' || selectedFormat === 'VECTOR_COLOR') {
+                // Download as high-res PNG with vectorization note
+                const upscaled = await upscaleImage(image, 2);
+                downloadImage(upscaled, `caricatura-hd-${timestamp}.png`);
+                setTimeout(() => {
+                    alert('✅ Download concluído!\n\n💡 Dica: Para vetorizar, use:\n• Adobe Illustrator (Image Trace)\n• Inkscape (gratuito)\n• Vectorizer.io (online)');
+                }, 500);
+            }
+            
+            setTimeout(() => {
+                setIsDownloading(false);
+            }, 1000);
+            
+        } catch (error) {
+            console.error('Download error:', error);
+            alert('❌ Erro ao fazer download. Tente novamente.');
             setIsDownloading(false);
-            alert(`Download iniciado: ${selectedFormat}`);
-        }, 1500);
+        }
     };
 
     return (

@@ -16,45 +16,52 @@ export default function Home() {
     const [isLoading, setIsLoading] = useState(false);
     const [currentImage, setCurrentImage] = useState<string>('');
     const [originalImage, setOriginalImage] = useState<string>(''); // Store the original photo
+    const [facialImage, setFacialImage] = useState<string>(''); // Store the facial caricature (step 2)
+    const [bodyImage, setBodyImage] = useState<string>(''); // Store the body caricature (step 3)
 
-    // State for generation params (unused in mock but good for structure)
+    // State for generation params
     const [selectedStyle, setSelectedStyle] = useState<Style | null>(null);
     const [selectedRatio, setSelectedRatio] = useState<string>("1:1");
+    const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
 
     const handleStyleSelect = async (style: Style, files: File[], aspectRatio: string) => {
         setIsLoading(true);
         setSelectedStyle(style);
         setSelectedRatio(aspectRatio);
         try {
-            // Save the original image for future reference (base64)
-            // Note: We should probably save the CROPPED version as original if we want consistency,
-            // but generateInitial returns the processed image.
-            // Let's rely on generateInitial to return the cropped image URL/Base64.
+            // Calculate dimensions based on aspect ratio
+            let width = 512;
+            let height = 512;
+
+            if (aspectRatio && aspectRatio !== "Original") {
+                const [wRatio, hRatio] = aspectRatio.split(':').map(Number);
+                const targetRatio = wRatio / hRatio;
+
+                if (targetRatio > 1) { // Landscape
+                    height = 512;
+                    width = Math.round(512 * targetRatio);
+                } else if (targetRatio < 1) { // Portrait
+                    width = 512;
+                    height = Math.round(512 / targetRatio);
+                }
+
+                // Ensure multiples of 8
+                width = Math.round(width / 8) * 8;
+                height = Math.round(height / 8) * 8;
+            }
+
+            setImageDimensions({ width, height });
 
             const result = await generateInitial(style, files, aspectRatio);
 
-            // We need to set the original image to the one we just sent to the AI (cropped)
-            // But generateInitial returns the AI output.
-            // Ideally, generateInitial should return both input (cropped) and output.
-            // For now, let's just set the originalImage from the file reader for safety, 
-            // BUT this means if we go back to step 2/3, we might lose the crop if we use originalImage.
-            // FIX: We will trust that the AI output has the correct ratio, and for subsequent steps
-            // we are modifying the AI output or the original.
-            // Actually, updateFacial uses 'originalImage'. If 'originalImage' is not cropped, 
-            // the AI will receive uncropped image in step 2.
-            // We need to crop the original image here too.
-
+            // Store the cropped original image for future updates
             const reader = new FileReader();
             reader.onload = async (e) => {
-                let base64Original = e.target?.result as string;
-                // We need to crop this base64Original to match what we sent to AI
-                // We can't easily import the crop function here without exporting it from lib/ai
-                // Let's assume for now we just store the raw original. 
-                // The updateFacial function in lib/ai should ALSO crop if we want to be perfect,
-                // or we just accept that step 2 might revert crop if we aren't careful.
-                // BETTER FIX: Let's export cropImageToRatio from lib/ai or move it to utils.
-                // For this iteration, let's just set originalImage.
-                setOriginalImage(base64Original);
+                const base64Original = e.target?.result as string;
+                // Import and use the crop function to ensure consistency
+                const { cropImageToRatio } = await import('@/lib/ai');
+                const croppedOriginal = await cropImageToRatio(base64Original, aspectRatio);
+                setOriginalImage(croppedOriginal);
             };
             reader.readAsDataURL(files[0]);
 
@@ -70,6 +77,14 @@ export default function Home() {
     };
 
     const handleFacialNext = async (exaggeration: number, prompt: string) => {
+        // Save the facial image before moving to body step
+        setFacialImage(currentImage);
+        
+        // If we already have a body image, show it, otherwise show facial
+        if (bodyImage) {
+            setCurrentImage(bodyImage);
+        }
+        
         setStep(3);
     };
 
@@ -78,9 +93,16 @@ export default function Home() {
         // This prevents the "degradation loop" where the image gets worse and worse.
         if (!originalImage) return;
 
-        // We show a loading state or just let the image update
-        const newImage = await updateFacial(originalImage, exaggeration, prompt);
+        // Pass dimensions to maintain aspect ratio
+        const newImage = await updateFacial(
+            originalImage, 
+            exaggeration, 
+            prompt,
+            imageDimensions?.width,
+            imageDimensions?.height
+        );
         setCurrentImage(newImage);
+        setFacialImage(newImage); // Update facial image state
     };
 
     const handleBodyNext = async (exaggeration: number, prompt: string) => {
@@ -88,18 +110,31 @@ export default function Home() {
     };
 
     const handleBodyUpdate = async (exaggeration: number, prompt: string) => {
-        // CRITICAL FIX: Always use the ORIGINAL image as the source.
-        if (!originalImage) return;
+        // For body generation, use the FACIAL caricature (from step 2), not the body image
+        // This ensures we always start from the good facial caricature
+        const sourceImage = facialImage || currentImage;
+        if (!sourceImage) return;
 
-        const newImage = await updateBody(originalImage, exaggeration, prompt);
+        // Pass dimensions to maintain aspect ratio
+        const newImage = await updateBody(
+            sourceImage, 
+            exaggeration, 
+            prompt,
+            imageDimensions?.width,
+            imageDimensions?.height
+        );
         setCurrentImage(newImage);
+        setBodyImage(newImage); // Save body image separately
     };
 
     const handleReset = () => {
         setStep(1);
         setCurrentImage('');
         setOriginalImage('');
+        setFacialImage('');
+        setBodyImage('');
         setSelectedStyle(null);
+        setImageDimensions(null);
     };
 
     return (
@@ -143,7 +178,7 @@ export default function Home() {
                             {step === 1 && <StyleSelection onNext={handleStyleSelect} />}
                             {step === 2 && (
                                 <FacialControls
-                                    image={currentImage}
+                                    image={facialImage || currentImage}
                                     onNext={handleFacialNext}
                                     onUpdate={handleFacialUpdate}
                                     onBack={() => setStep(1)}
@@ -151,10 +186,16 @@ export default function Home() {
                             )}
                             {step === 3 && (
                                 <BodyControls
-                                    image={currentImage}
+                                    image={bodyImage || currentImage}
                                     onNext={handleBodyNext}
                                     onUpdate={handleBodyUpdate}
-                                    onBack={() => setStep(2)}
+                                    onBack={() => {
+                                        // When going back, restore facial image
+                                        if (facialImage) {
+                                            setCurrentImage(facialImage);
+                                        }
+                                        setStep(2);
+                                    }}
                                 />
                             )}
                             {step === 4 && (

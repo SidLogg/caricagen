@@ -49,8 +49,9 @@ const convertToGrayscale = (base64Image: string): Promise<string> => {
     });
 };
 
-// Helper to crop image to specific aspect ratio
-const cropImageToRatio = (base64Image: string, ratioStr: string): Promise<string> => {
+// Helper to crop image to specific aspect ratio (exported for use in components)
+// Always outputs 512x512 with the content cropped to the target aspect ratio
+export const cropImageToRatio = (base64Image: string, ratioStr: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new Image();
         img.crossOrigin = 'Anonymous';
@@ -66,54 +67,59 @@ const cropImageToRatio = (base64Image: string, ratioStr: string): Promise<string
                 const targetRatio = wRatio / hRatio;
                 const imgRatio = img.width / img.height;
 
-                let renderWidth = img.width;
-                let renderHeight = img.height;
-                let offsetX = 0;
-                let offsetY = 0;
+                let sourceX = 0;
+                let sourceY = 0;
+                let sourceWidth = img.width;
+                let sourceHeight = img.height;
 
-                // Center Crop Logic
+                // Center Crop Logic - crop the source image to match target ratio
                 if (imgRatio > targetRatio) {
                     // Image is wider than target -> Crop width
-                    renderWidth = img.height * targetRatio;
-                    renderHeight = img.height;
-                    offsetX = (img.width - renderWidth) / 2;
-                    offsetY = 0;
+                    sourceWidth = img.height * targetRatio;
+                    sourceHeight = img.height;
+                    sourceX = (img.width - sourceWidth) / 2;
+                    sourceY = 0;
                 } else {
                     // Image is taller than target -> Crop height
-                    renderWidth = img.width;
-                    renderHeight = img.width / targetRatio;
-                    offsetX = 0;
-                    offsetY = (img.height - renderHeight) / 2;
+                    sourceWidth = img.width;
+                    sourceHeight = img.width / targetRatio;
+                    sourceX = 0;
+                    sourceY = (img.height - sourceHeight) / 2;
                 }
 
-                // Output Dimensions (Fixed to SD friendly sizes)
-                // We use a larger base to ensure quality
-                const baseSize = 768;
-                let finalWidth, finalHeight;
+                // Always output 512x512 for Cloudflare compatibility
+                canvas.width = 512;
+                canvas.height = 512;
 
-                if (targetRatio > 1) { // Landscape (e.g. 16:9)
-                    finalHeight = 512;
-                    finalWidth = Math.round(512 * targetRatio);
-                } else if (targetRatio < 1) { // Portrait (e.g. 9:16)
-                    finalWidth = 512;
-                    finalHeight = Math.round(512 / targetRatio);
-                } else { // Square
-                    finalWidth = 512;
-                    finalHeight = 512;
+                // Fill with white background first
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, 512, 512);
+
+                // Calculate how to fit the cropped content into 512x512
+                let destX = 0;
+                let destY = 0;
+                let destWidth = 512;
+                let destHeight = 512;
+
+                if (targetRatio > 1) {
+                    // Landscape - fit width, center vertically
+                    destHeight = 512 / targetRatio;
+                    destY = (512 - destHeight) / 2;
+                } else if (targetRatio < 1) {
+                    // Portrait - fit height, center horizontally
+                    destWidth = 512 * targetRatio;
+                    destX = (512 - destWidth) / 2;
                 }
 
-                // Ensure multiples of 64
-                finalWidth = Math.floor(finalWidth / 64) * 64;
-                finalHeight = Math.floor(finalHeight / 64) * 64;
-
-                canvas.width = finalWidth;
-                canvas.height = finalHeight;
-
-                // Draw
-                ctx.drawImage(img, offsetX, offsetY, renderWidth, renderHeight, 0, 0, finalWidth, finalHeight);
+                // Draw the cropped image
+                ctx.drawImage(
+                    img,
+                    sourceX, sourceY, sourceWidth, sourceHeight,
+                    destX, destY, destWidth, destHeight
+                );
 
                 const result = canvas.toDataURL('image/png');
-                console.log(`[Crop] Success: ${finalWidth}x${finalHeight}`);
+                console.log(`[Crop] Success: 512x512 with ${ratioStr} content`);
                 resolve(result);
 
             } catch (e) {
@@ -137,8 +143,10 @@ export async function generateInitial(style: Style, files: File[], aspectRatio: 
         let imageBase64 = await fileToBase64(files[0]);
 
         // Crop to aspect ratio if needed
+        // The cropped image will be sent to the model, which will generate 512x512
+        // but the content will respect the aspect ratio
         if (aspectRatio && aspectRatio !== "Original") {
-            console.log("[AI] Cropping...");
+            console.log("[AI] Cropping to aspect ratio:", aspectRatio);
             imageBase64 = await cropImageToRatio(imageBase64, aspectRatio);
         }
 
@@ -151,8 +159,7 @@ export async function generateInitial(style: Style, files: File[], aspectRatio: 
                 image: imageBase64,
                 style,
                 prompt: "best quality, masterpiece",
-                // We do NOT send width/height to API anymore to avoid conflicts.
-                // The image itself is already resized.
+                // Not sending width/height - Cloudflare model doesn't support custom dimensions
             }),
         });
 
@@ -174,7 +181,13 @@ export async function generateInitial(style: Style, files: File[], aspectRatio: 
     }
 }
 
-export async function updateFacial(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
+export async function updateFacial(
+    currentImage: string, 
+    exaggeration: number, 
+    prompt: string,
+    width?: number,
+    height?: number
+): Promise<string> {
     try {
         let imageToSend = currentImage;
         const promptLower = prompt.toLowerCase();
@@ -186,14 +199,20 @@ export async function updateFacial(currentImage: string, exaggeration: number, p
             imageToSend = await convertToGrayscale(currentImage);
         }
 
+        // Build facial prompt - if user provides prompt, use it directly
+        const facialPrompt = prompt && prompt.trim() 
+            ? prompt.trim() 
+            : "expressive facial features, detailed face";
+
         const response = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 image: imageToSend,
                 style: "Caricatura 2D",
-                prompt: `facial features, ${prompt}`,
+                prompt: facialPrompt,
                 exaggeration: exaggeration
+                // Not sending width/height - model doesn't support it
             }),
         });
 
@@ -206,8 +225,21 @@ export async function updateFacial(currentImage: string, exaggeration: number, p
     }
 }
 
-export async function updateBody(currentImage: string, exaggeration: number, prompt: string): Promise<string> {
+export async function updateBody(
+    currentImage: string, 
+    exaggeration: number, 
+    prompt: string,
+    width?: number,
+    height?: number
+): Promise<string> {
     try {
+        // IMPORTANTE: A geração de corpo a partir de busto não funciona bem com o modelo Cloudflare
+        // O modelo img2img só consegue TRANSFORMAR o que existe, não ADICIONAR conteúdo novo
+        // Para adicionar corpo, seria necessário:
+        // 1. Usar a foto ORIGINAL completa (não o busto)
+        // 2. Ou usar modelos mais avançados (DALL-E 3, Midjourney, SD-XL com ControlNet)
+        
+        // Por enquanto, vamos apenas aplicar transformações de estilo ao corpo existente
         let imageToSend = currentImage;
         const promptLower = prompt.toLowerCase();
 
@@ -218,14 +250,20 @@ export async function updateBody(currentImage: string, exaggeration: number, pro
             imageToSend = await convertToGrayscale(currentImage);
         }
 
+        // Build body prompt - if user provides prompt, use it directly
+        const bodyPrompt = prompt && prompt.trim() 
+            ? prompt.trim() 
+            : "full body character, detailed clothing";
+
         const response = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 image: imageToSend,
                 style: "Caricatura 2D",
-                prompt: `full body, ${prompt}`,
-                exaggeration: exaggeration
+                prompt: bodyPrompt,
+                exaggeration: exaggeration,
+                bodyMode: true
             }),
         });
 

@@ -29,10 +29,10 @@ async function runCloudflareAI(model: string, input: any) {
 }
 
 export async function POST(request: Request) {
-    console.log("=== API Generate Called (Cloudflare Workers AI) ===");
+    console.log("=== API Generate Called (Cloudflare Workers AI v2) ===");
 
     try {
-        const { image, style, prompt, exaggeration, width, height } = await request.json();
+        const { image, style, prompt, exaggeration, width, height, bodyMode } = await request.json();
 
         if (!image) {
             return NextResponse.json({ error: "No image provided" }, { status: 400 });
@@ -40,44 +40,87 @@ export async function POST(request: Request) {
 
         // Prepare prompts based on style
         let stylePrompt = "";
-        let negativePrompt = "blurry, low quality, distorted, ugly, bad anatomy, watermark, text, different face, different person, mutated";
+        let negativePrompt = "low quality, worst quality, blurry, out of focus, bad anatomy, deformed, disfigured, ugly, amateur, poorly drawn, messy lines, watermark, signature, text, logo, jpeg artifacts, compression, noise, grainy, pixelated, low resolution, bad proportions, asymmetric, crooked, uneven, sloppy, rushed, unprofessional";
 
-        // CRITICAL: Keep strength LOW to preserve identity. 
+        // CRITICAL: Keep strength LOW to preserve identity for face
+        // But INCREASE for body generation to allow more creativity
         let strength = 0.45;
 
         // Adjust prompt based on exaggeration slider (0-100)
+        // Use smooth gradual changes for consistency
         let exaggerationPrompt = "";
         const exValue = exaggeration ? Number(exaggeration) : 50; // Default 50
+        
+        // Calculate strength based on exaggeration level (smooth curve)
+        // 0% = 0.35 (very close to original)
+        // 50% = 0.45 (balanced)
+        // 100% = 0.60 (maximum exaggeration)
+        const baseStrength = 0.35 + (exValue / 100) * 0.25;
 
-        if (exValue < 30) {
-            exaggerationPrompt = "subtle, slight caricature, realistic proportions";
-            strength = 0.40; // Very close to original
-        } else if (exValue < 70) {
-            exaggerationPrompt = "moderately exaggerated features, funny, expressive";
-            strength = 0.45; // Balanced
+        if (exValue === 0) {
+            exaggerationPrompt = "no exaggeration, natural proportions, realistic features, accurate representation";
+            strength = 0.30; // Minimal change
+        } else if (exValue < 20) {
+            exaggerationPrompt = "very subtle caricature, slightly emphasized features, natural look, gentle stylization";
+            strength = baseStrength;
+        } else if (exValue < 40) {
+            exaggerationPrompt = "mild caricature, softly exaggerated features, recognizable, pleasant stylization";
+            strength = baseStrength;
+        } else if (exValue < 60) {
+            exaggerationPrompt = "moderate caricature, clearly exaggerated features, expressive, fun stylization";
+            strength = baseStrength;
+        } else if (exValue < 80) {
+            exaggerationPrompt = "strong caricature, notably exaggerated features, bold stylization, humorous";
+            strength = baseStrength;
         } else {
-            exaggerationPrompt = "highly exaggerated, big head, huge nose, distorted features, extreme caricature, comical";
-            strength = 0.50; // Allow a bit more freedom for extreme exaggeration
+            exaggerationPrompt = "extreme caricature, highly exaggerated features, dramatic stylization, comical";
+            strength = baseStrength;
+        }
+        
+        console.log(`Exaggeration: ${exValue}% - Strength: ${strength.toFixed(2)}`);
+
+        // BODY MODE: Use moderate strength to apply style changes
+        const isBodyMode = bodyMode === true;
+        if (isBodyMode) {
+            // Use moderate strength to apply clothing/style changes without destroying the image
+            // Note: img2img cannot ADD body parts that don't exist in the source
+            strength = 0.55; // Moderate strength for style changes only
+            console.log("🎨 Body mode enabled - using moderate strength:", strength);
+        }
+
+        // If user provides a detailed prompt, increase strength to allow more changes
+        if (prompt && prompt.trim() && prompt.trim().length > 20) {
+            strength = Math.min(strength + 0.15, 0.75);
+            console.log("📝 User prompt detected - increased strength to:", strength);
         }
 
         switch (style) {
             case "Cartoon 2D":
-                stylePrompt = `2D cartoon character, flat colors, bold black outlines, cel-shaded, vector art style, vibrant, (preserve facial features:1.5), recognizable identity, ${exaggerationPrompt}`;
-                negativePrompt += ", 3d, realistic, photo, shading, gradient";
+                stylePrompt = `professional 2D cartoon illustration, clean vector art style, flat cel shading, bold black outlines, vibrant solid colors, animated series quality, Disney TV animation style, simple shapes, ${exaggerationPrompt}`;
+                negativePrompt += ", 3d render, realistic, photograph, sketchy, messy lines, watercolor, painterly, shading, gradient, textured";
                 break;
             case "Cartoon 3D":
-                stylePrompt = `3D Pixar Disney style character, cute, volumetric lighting, 3d render, cgi, smooth, highly detailed, (preserve identity:1.5), (same face:1.4), ${exaggerationPrompt}`;
-                negativePrompt += ", 2d, flat, sketch, drawing";
+                stylePrompt = `high quality 3D Pixar character, Disney CGI animation style, smooth plastic shader, volumetric lighting, subsurface scattering, professional 3D render, Dreamworks quality, ${exaggerationPrompt}`;
+                negativePrompt += ", 2d, flat, hand drawn, sketch, painting, anime, low poly, clay";
                 break;
             case "Caricatura 2D":
-                stylePrompt = `funny caricature drawing, cartoon style, hand drawn, illustration, (preserve likeness:1.5), ${exaggerationPrompt}`;
+                stylePrompt = `professional caricature illustration, exaggerated cartoon portrait, editorial caricature style, bold ink lines, vibrant colors, MAD Magazine quality, expressive features, ${exaggerationPrompt}`;
+                negativePrompt += ", realistic, photograph, 3d, amateur, sketchy, messy";
                 break;
             case "Caricatura Realista":
-                stylePrompt = `realistic caricature, hyperrealistic, highly detailed, oil painting style, professional art, (preserve identity:1.6), (same person:1.5), ${exaggerationPrompt}`;
-                strength = 0.40; // Realism needs strict adherence to photo
+                stylePrompt = `hyperrealistic caricature painting, oil painting style, professional portrait art, subtle exaggeration, fine details, museum quality, classical painting technique, ${exaggerationPrompt}`;
+                negativePrompt += ", cartoon, flat, 2d, anime, low quality, amateur";
+                if (!isBodyMode) {
+                    strength = 0.40;
+                }
                 break;
             default:
-                stylePrompt = "cartoon character, preserve identity";
+                stylePrompt = "professional cartoon character";
+        }
+
+        // Enhance negative prompt for body mode
+        if (isBodyMode) {
+            negativePrompt += ", cropped, cut off, headshot only, portrait only, bust only, shoulders only, missing body, no legs, no arms, incomplete, half body, upper body only, torso only, different face, changed face, altered face, modified head";
         }
 
         // Combine prompts
@@ -103,11 +146,20 @@ export async function POST(request: Request) {
             // DO NOT INCREASE STRENGTH. We rely on the input image being grayscale.
         }
 
-        const finalPrompt = prompt && prompt.trim()
-            ? `(${prompt.trim()}:1.5), ${stylePrompt}`
-            : `${stylePrompt}, masterpiece, best quality`;
+        // Build final prompt with quality tags and USER PROMPT as priority
+        const qualityTags = "masterpiece, best quality, professional artwork, high resolution, detailed, clean lines, perfect composition, award winning";
+        
+        let finalPrompt;
+        if (prompt && prompt.trim()) {
+            // User provided a prompt - give it MAXIMUM priority
+            finalPrompt = `${qualityTags}, (${prompt.trim()}:2.0), ${stylePrompt}`;
+        } else {
+            // No user prompt - use style defaults
+            finalPrompt = `${qualityTags}, ${stylePrompt}`;
+        }
 
         console.log(`Generating with Style: ${style}, Strength: ${strength}`);
+        console.log(`User Prompt: "${prompt || 'none'}"`);
         console.log(`Final Prompt: ${finalPrompt}`);
 
         // Convert Base64 image to Array of Integers
@@ -115,21 +167,36 @@ export async function POST(request: Request) {
         const imageBuffer = Buffer.from(base64Data, 'base64');
         const imageArray = Array.from(new Uint8Array(imageBuffer));
 
-        // Use Stable Diffusion v1.5 Inpainting/Img2Img model
+        // Note: Inpainting model has issues with Cloudflare, using img2img with high strength instead
+
+        // Use img2img model for all generations
+        // Inpainting model has issues with Cloudflare
         const model = "@cf/runwayml/stable-diffusion-v1-5-img2img";
+
+        // Cloudflare SD 1.5 img2img has strict dimension requirements
+        // The model works best with standard sizes, not custom dimensions
+        // We'll use 512x512 and let the frontend handle aspect ratio display
+        
+        console.log(`Requested dimensions: ${width}x${height}`);
+        console.log("Note: Using 512x512 for Cloudflare compatibility");
+
+        // Higher guidance = follow prompt more strictly and better quality
+        // Use higher guidance for better adherence to style and quality
+        const guidanceScale = (prompt && prompt.trim()) ? 10.0 : 8.5;
 
         const input: any = {
             prompt: finalPrompt,
             image: imageArray, // Pass the image bytes
             strength: strength, // 0.0 to 1.0 (higher = more AI, less original)
-            guidance: 7.5,
+            guidance: guidanceScale, // High guidance when user provides prompt
             negative_prompt: negativePrompt
+            // NOT passing width/height - let the model use its default
         };
 
-        // If dimensions are provided, pass them to the model to enforce output size
-        if (width && height) {
-            input.width = width;
-            input.height = height;
+        console.log(`Guidance Scale: ${guidanceScale}`);
+
+        if (isBodyMode) {
+            console.log("🎨 Using img2img with high strength for body generation");
         }
 
         const outputBuffer = await runCloudflareAI(model, input);

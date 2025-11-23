@@ -11,7 +11,7 @@ interface BodyControlsProps {
 }
 
 export default function BodyControls({ image, onNext, onUpdate, onBack }: BodyControlsProps) {
-    const [exaggeration, setExaggeration] = useState(50);
+    const [exaggeration, setExaggeration] = useState(40); // Start at moderate level
     const [prompt, setPrompt] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
@@ -22,12 +22,12 @@ export default function BodyControls({ image, onNext, onUpdate, onBack }: BodyCo
     };
 
     const getExaggerationLabel = (val: number) => {
-        if (val === 0) return 'Nenhum';
-        if (val <= 20) return 'Super Leve';
-        if (val <= 40) return 'Leve';
-        if (val <= 60) return 'Moderada';
-        if (val <= 80) return 'Exagerada';
-        return 'Super Exagerada';
+        if (val === 0) return 'Natural (Sem Exagero)';
+        if (val < 20) return 'Muito Sutil';
+        if (val < 40) return 'Suave';
+        if (val < 60) return 'Moderado';
+        if (val < 80) return 'Forte';
+        return 'Extremo';
     };
 
     return (
@@ -55,7 +55,7 @@ export default function BodyControls({ image, onNext, onUpdate, onBack }: BodyCo
             <div className="flex flex-col justify-center space-y-8">
                 <div>
                     <h2 className="text-3xl font-bold mb-2">Arte Corporal</h2>
-                    <p className="text-muted-foreground">Defina o corpo e a pose da caricatura.</p>
+                    <p className="text-muted-foreground">Ajuste o estilo e detalhes do corpo.</p>
                 </div>
 
                 <div className="space-y-4">
@@ -67,6 +67,7 @@ export default function BodyControls({ image, onNext, onUpdate, onBack }: BodyCo
                         type="range"
                         min="0"
                         max="100"
+                        step="5"
                         value={exaggeration}
                         onChange={(e) => setExaggeration(Number(e.target.value))}
                         onMouseUp={handleUpdate}
@@ -74,17 +75,18 @@ export default function BodyControls({ image, onNext, onUpdate, onBack }: BodyCo
                         className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>0%</span>
-                        <span>100%</span>
+                        <span>0% Natural</span>
+                        <span>50% Moderado</span>
+                        <span>100% Extremo</span>
                     </div>
                 </div>
 
                 <div className="space-y-2">
-                    <label className="font-medium">Prompt Corporal (Opcional)</label>
+                    <label className="font-medium">Descreva roupas e acessórios (Opcional)</label>
                     <textarea
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="Ex: Vestindo terno azul, segurando uma guitarra, pose de super-herói..."
+                        placeholder="Ex: vestindo terno azul escuro, gravata vermelha, segurando uma maleta preta, fundo de escritório..."
                         className="w-full p-3 rounded-lg border bg-background min-h-[100px] focus:ring-2 focus:ring-primary outline-none"
                     />
                     <button
