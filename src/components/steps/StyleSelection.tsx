@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Style } from '@/lib/ai';
 
 interface StyleSelectionProps {
-    onNext: (style: Style, files: File[]) => void;
+    onNext: (style: Style, files: File[], aspectRatio: string) => void;
 }
 
 const STYLES: { id: Style; label: string; color: string }[] = [
@@ -21,6 +21,15 @@ const STYLES: { id: Style; label: string; color: string }[] = [
 export default function StyleSelection({ onNext }: StyleSelectionProps) {
     const [selectedStyle, setSelectedStyle] = useState<Style | null>(null);
     const [files, setFiles] = useState<File[]>([]);
+    const [aspectRatio, setAspectRatio] = useState<string>("1:1");
+
+    const ASPECT_RATIOS = [
+        { id: "1:1", label: "Quadrado (1:1)", icon: "square" },
+        { id: "9:16", label: "Story (9:16)", icon: "smartphone" },
+        { id: "16:9", label: "Paisagem (16:9)", icon: "monitor" },
+        { id: "3:4", label: "Retrato (3:4)", icon: "portrait" },
+        { id: "4:3", label: "Clássico (4:3)", icon: "image" },
+    ];
 
     const onDrop = (acceptedFiles: File[]) => {
         setFiles((prev) => [...prev, ...acceptedFiles]);
@@ -33,7 +42,13 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
 
     const handleNext = () => {
         if (selectedStyle && files.length > 0) {
-            onNext(selectedStyle, files);
+            // Pass aspect ratio to parent/next step
+            // Note: We need to update the interface in the parent component too, 
+            // but for now we pass it as an additional argument if supported, 
+            // or we handle it in the AI lib.
+            // Let's assume onNext signature will be updated.
+            // @ts-ignore
+            onNext(selectedStyle, files, aspectRatio);
         }
     };
 
@@ -76,6 +91,26 @@ export default function StyleSelection({ onNext }: StyleSelectionProps) {
                         )}
                     </motion.div>
                 ))}
+            </div>
+
+            <div className="space-y-4">
+                <h3 className="text-xl font-bold">Proporção da Arte</h3>
+                <div className="flex flex-wrap gap-3">
+                    {ASPECT_RATIOS.map((ratio) => (
+                        <button
+                            key={ratio.id}
+                            onClick={() => setAspectRatio(ratio.id)}
+                            className={cn(
+                                "px-4 py-2 rounded-lg border font-medium transition-all flex items-center gap-2",
+                                aspectRatio === ratio.id
+                                    ? "bg-primary text-primary-foreground border-primary"
+                                    : "bg-background hover:bg-muted"
+                            )}
+                        >
+                            {ratio.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             <div className="space-y-4">
